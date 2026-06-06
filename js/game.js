@@ -640,9 +640,8 @@
 
   // ---- game flow ----
   function updateScoreBadge() {
-    var b = $('score-badge');
-    b.classList.remove('hidden');
-    b.textContent = game.totalAce.toFixed(1) + ' ACE';   // headline score = summed ACE
+    $('score-badge').classList.remove('hidden');
+    $('score-badge-val').textContent = game.totalAce.toFixed(1) + ' ACE';   // headline score = summed ACE
   }
 
   function startGame() {

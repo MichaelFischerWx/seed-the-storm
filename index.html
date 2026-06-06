@@ -4,6 +4,23 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Seed the Storm — a tropical cyclone ACE game</title>
+  <meta name="description" content="An educational tropical-cyclone game: pick the seed that spins up the most ACE, on real ERA5 data + LGEM intensity physics." />
+  <meta name="theme-color" content="#0b1322" />
+  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
+  <link rel="icon" type="image/png" sizes="64x64" href="assets/icon-64.png" />
+  <link rel="apple-touch-icon" href="assets/icon-180.png" />
+  <!-- Social preview (Open Graph + Twitter) -->
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Seed the Storm" />
+  <meta property="og:description" content="Pick the seed that spins up the most ACE — an educational tropical-cyclone game on real ERA5 data." />
+  <meta property="og:url" content="https://michaelfischerwx.github.io/seed-the-storm/" />
+  <meta property="og:image" content="https://michaelfischerwx.github.io/seed-the-storm/assets/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Seed the Storm" />
+  <meta name="twitter:description" content="Pick the seed that spins up the most ACE — an educational tropical-cyclone game on real ERA5 data." />
+  <meta name="twitter:image" content="https://michaelfischerwx.github.io/seed-the-storm/assets/og-image.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
@@ -64,7 +81,7 @@
           <span class="deal-basin">North Atlantic · <span id="round-label">Round 1 / 6</span></span>
           <span id="deal-date" class="deal-date">—</span>
         </div>
-        <div id="score-badge" class="score-badge hidden">0.0 ACE</div>
+        <div id="score-badge" class="score-badge hidden"><span id="score-badge-val">0.0 ACE</span><span class="info" tabindex="0" data-tip="ACE = Accumulated Cyclone Energy — a storm's total power over its whole life (peak wind² summed every 6 h). A long-lived hurricane outscores a brief intense one."><svg class="info-ic"><use href="#ic-info"/></svg></span></div>
         <button id="deal-btn" class="btn">New game</button>
       </div>
     </header>
@@ -86,7 +103,9 @@
               environment</b> for that month.</li>
             <li>Four candidate <b>TC seeds</b> drop onto the map (the colored pins).</li>
             <li>Pick the seed you think will spin up into the storm with the most
-              <b>Accumulated Cyclone Energy (ACE)</b>.</li>
+              <b>Accumulated Cyclone Energy (ACE)</b> — a measure of a storm's
+              total power over its whole life, so a long-lived hurricane scores
+              more than a brief intense one.</li>
             <li>We integrate every seed forward through the real winds, shear, and
               ocean until it dissipates — then reveal who was right and score you
               against the best possible pick.</li>
