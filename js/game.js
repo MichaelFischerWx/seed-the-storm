@@ -46,8 +46,11 @@
       ' <span class="mc-day">· day ' + (hr / 24).toFixed(1) + '</span>';
   }
   function status(msg, isErr) {
-    elStatus.textContent = msg || '';
     elStatus.classList.toggle('error', !!isErr);
+    elStatus.innerHTML = '';
+    if (!msg) return;
+    if (!isErr) { var sp = document.createElement('span'); sp.className = 'spinner'; elStatus.appendChild(sp); }
+    var t = document.createElement('span'); t.textContent = msg; elStatus.appendChild(t);
   }
 
   function colorForV(v) {
@@ -435,25 +438,27 @@
     // Was there actually a "monster" to miss? Only if the best seed became a
     // hurricane — otherwise it was a hostile round and missing isn't on you.
     var hadMonster = best.peakV >= 64;
-    var v = $('verdict'), cls, msg;
+    var v = $('verdict'), cls, msg, icon;
     if (chosenIdx === bi) {
       cls = 'win';
-      msg = hadMonster ? '🎯 Bullseye — you picked the best seed!'
-                       : '🎯 Best of a quiet bunch — you found the strongest!';
+      if (hadMonster) { icon = 'ic-target'; msg = 'Bullseye — you picked the best seed!'; }
+      else { icon = 'ic-trophy'; msg = 'Best of a quiet bunch — you found the strongest!'; }
     } else if (!hadMonster) {
-      cls = 'ok'; msg = '😐 Quiet round — nothing really spun up.';
+      cls = 'ok'; icon = 'ic-neutral'; msg = 'Quiet round — nothing really spun up.';
     } else if (pct >= 75) {
-      cls = 'ok'; msg = '👍 Close — a strong pick.';
+      cls = 'ok'; icon = 'ic-check'; msg = 'Close — a strong pick.';
     } else {
-      cls = 'miss'; msg = '🌬️ Missed the monster.';
+      cls = 'miss'; icon = 'ic-wind'; msg = 'Missed the monster.';
     }
-    v.className = 'verdict ' + cls; v.textContent = msg;
+    v.className = 'verdict ' + cls;
+    v.innerHTML = '<svg class="v-ic"><use href="#' + icon + '"/></svg>';
+    var vmsg = document.createElement('span'); vmsg.textContent = msg; v.appendChild(vmsg);
 
     $('score-line').innerHTML = 'Your seed ' + SEED_LABELS[chosenIdx] + ' made <b>' +
       chosen.ace.toFixed(1) + ' ACE</b> — ' + pct + '% of the best (seed ' + SEED_LABELS[bi] + ', ' +
       best.ace.toFixed(1) + ') → <b>+' + pct + ' pts</b>.';
 
-    $('next-btn').textContent = game.round < ROUNDS ? 'Next round →' : 'See final results 🏆';
+    $('next-btn').textContent = game.round < ROUNDS ? 'Next round →' : 'See final results';
 
     var ul = $('result-list'); ul.innerHTML = '';
     results.map(function (r, i) { return { r: r, i: i }; })
@@ -517,7 +522,8 @@
     function Y(v) { return padT + (h - padT - padB) * (1 - v / maxV); }
     function Ysh(kt) { return padT + (h - padT - padB) * (1 - kt / maxSh); }
 
-    ctx.strokeStyle = '#243352'; ctx.fillStyle = '#5b6b8c'; ctx.font = '9px sans-serif'; ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(36,51,82,.85)'; ctx.fillStyle = '#687c9f';
+    ctx.font = '10px Inter, system-ui, sans-serif'; ctx.lineWidth = 1;
     [34, 64, 96, 137].forEach(function (lv) {
       ctx.beginPath(); ctx.moveTo(padL, Y(lv)); ctx.lineTo(w - padR, Y(lv)); ctx.stroke();
       ctx.fillText(lv + 'kt', 2, Y(lv) + 3);
@@ -548,15 +554,24 @@
       ctx.stroke();
     });
 
+    // Soft gradient area fill under the chosen V curve (adds depth).
+    var baseY = Y(0);
+    var grad = ctx.createLinearGradient(0, padT, 0, baseY);
+    grad.addColorStop(0, 'rgba(61,130,246,0.30)');
+    grad.addColorStop(1, 'rgba(61,130,246,0.02)');
+    ctx.fillStyle = grad; ctx.beginPath(); ctx.moveTo(X(cpts[0].hr), baseY);
+    for (var a = 0; a < cpts.length; a++) ctx.lineTo(X(cpts[a].hr), Y(cpts[a].v));
+    ctx.lineTo(X(cpts[cpts.length - 1].hr), baseY); ctx.closePath(); ctx.fill();
+
     // Chosen storm, colored by intensity.
-    ctx.lineWidth = 2.4;
+    ctx.lineWidth = 2.4; ctx.lineCap = 'round';
     for (var k = 1; k < cpts.length; k++) {
       ctx.strokeStyle = colorForV(cpts[k].v); ctx.beginPath();
       ctx.moveTo(X(cpts[k - 1].hr), Y(cpts[k - 1].v)); ctx.lineTo(X(cpts[k].hr), Y(cpts[k].v)); ctx.stroke();
     }
-    ctx.fillStyle = '#93a4c4';
+    ctx.fillStyle = '#9fb1d0';
     ctx.fillText('day 0', X(0) + 2, h - 4);
-    ctx.fillText('day ' + (maxHr / 24), X(maxHr) - 30, h - 4);
+    ctx.fillText('day ' + (maxHr / 24), X(maxHr) - 32, h - 4);
   }
 
   // ---- reset ----
