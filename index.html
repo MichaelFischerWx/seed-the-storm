@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Seed the Storm — a tropical cyclone ACE game</title>
+  <link rel="preconnect" href="https://storage.googleapis.com" crossorigin />
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <header id="topbar">
+      <div class="brand">
+        <span class="brand-mark">🌀</span>
+        <div class="brand-text">
+          <h1>Seed the Storm</h1>
+          <p class="subtitle">Pick the seed that spins up the most&nbsp;ACE</p>
+        </div>
+      </div>
+      <div class="deal-block">
+        <div id="deal-info" class="deal-info">
+          <span class="deal-basin">North Atlantic · <span id="round-label">Round 1 / 6</span></span>
+          <span id="deal-date" class="deal-date">—</span>
+        </div>
+        <div id="score-badge" class="score-badge hidden">0.0 ACE</div>
+        <button id="deal-btn" class="btn">New game</button>
+      </div>
+    </header>
+
+    <main id="main">
+      <div id="map"></div>
+      <div id="map-clock" class="map-clock hidden"></div>
+      <div id="map-legend" class="map-legend hidden"></div>
+
+      <aside id="panel">
+        <!-- Stage: intro -->
+        <section id="stage-intro" class="stage">
+          <h2>How to play</h2>
+          <ol class="howto">
+            <li>Each game is <b>6 rounds</b> — one per hurricane-season month,
+              <b>June through November</b> (each from a random year). Watch how
+              the shear relaxes and the storms strengthen toward the Aug–Oct
+              peak, then fade by November. The map shows the <b>real ERA5
+              environment</b> for that month.</li>
+            <li>Four candidate <b>TC seeds</b> drop onto the map (the colored pins).</li>
+            <li>Pick the seed you think will spin up into the storm with the most
+              <b>Accumulated Cyclone Energy (ACE)</b>.</li>
+            <li>We integrate every seed forward through the real winds, shear, and
+              ocean until it dissipates — then reveal who was right and score you
+              against the best possible pick.</li>
+          </ol>
+          <p class="hint">Warm water + low shear + a long track over open ocean = big ACE.
+            Land and shear are storm-killers.</p>
+          <button id="start-btn" class="btn btn-primary btn-block">Start game</button>
+        </section>
+
+        <!-- Stage: pick -->
+        <section id="stage-pick" class="stage hidden">
+          <h2>Choose your seed</h2>
+          <p class="muted">Tap a pin on the map, or a seed below. Which one becomes the
+            beast?</p>
+          <ul id="seed-list" class="seed-list"></ul>
+          <div class="env-toggles">
+            <label><input type="checkbox" id="tog-flow" checked /> Steering flow</label>
+            <label><input type="checkbox" id="tog-shear" /> Wind shear (kt)</label>
+            <label><input type="checkbox" id="tog-mpi" /> Ocean potential</label>
+          </div>
+          <button id="run-btn" class="btn btn-primary btn-block" disabled>
+            Choose this seed
+          </button>
+        </section>
+
+        <!-- Stage: result -->
+        <section id="stage-result" class="stage hidden">
+          <div id="verdict" class="verdict"></div>
+          <div id="score-line" class="score-line"></div>
+          <canvas id="intensity-chart" width="320" height="160"></canvas>
+          <label class="chart-toggle"><input type="checkbox" id="tog-track-shear" /> Shear along track</label>
+          <ul id="result-list" class="result-list"></ul>
+          <p id="teach" class="teach"></p>
+          <div class="result-actions">
+            <button id="replay-btn" class="btn">▶ Replay</button>
+            <button id="next-btn" class="btn btn-primary">Next round →</button>
+          </div>
+        </section>
+
+        <!-- Stage: summary -->
+        <section id="stage-summary" class="stage hidden">
+          <h2>Final results</h2>
+          <div id="summary-total" class="summary-total"></div>
+          <ul id="summary-list" class="result-list"></ul>
+          <div id="leaderboard" class="leaderboard"></div>
+          <button id="again-btn" class="btn btn-primary btn-block">Play again</button>
+        </section>
+
+        <div id="status" class="status"></div>
+      </aside>
+    </main>
+  </div>
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+  <!-- ERA5 data ships in this repo under data/ (same-origin, zero egress).
+       To host the pack elsewhere, set window.SEEDSTORM_DATA = { base: 'https://…' }. -->
+  <script src="js/era5.js"></script>
+  <script src="js/mpi.js"></script>
+  <script src="js/model.js"></script>
+  <script src="js/particles.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>

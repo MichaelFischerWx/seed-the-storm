@@ -1,0 +1,12 @@
+[
+  {
+    "AllowedOrigins": [
+      "https://michaelfischerwx.github.io",
+      "http://localhost:8091",
+      "http://localhost:8000"
+    ],
+    "AllowedMethods": ["GET", "HEAD"],
+    "AllowedHeaders": ["*"],
+    "MaxAgeSeconds": 3600
+  }
+]
