@@ -62,8 +62,12 @@
 
   // ---- map ----
   function initMap() {
-    map = L.map('map', { worldCopyJump: true, minZoom: 2, maxZoom: 8 })
-      .setView([22, -52], 4);
+    // Lock the view to the data band (0–60 °N, all lon) so the field always
+    // fills the frame and the edges read as the map's frame, not missing data.
+    map = L.map('map', {
+      worldCopyJump: false, minZoom: 3, maxZoom: 8,
+      maxBounds: [[0, -180], [60, 180]], maxBoundsViscosity: 1.0,
+    }).setView([28, -52], 4);
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
       attribution: '&copy; OpenStreetMap &copy; CARTO &middot; ERA5 via TC-ATLAS',
       subdomains: 'abcd', maxZoom: 8,
