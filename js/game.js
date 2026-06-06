@@ -6,7 +6,6 @@
   var YEARS = []; for (var y = 1991; y <= 2020; y++) YEARS.push(y);
   var ROUND_MONTHS = [6, 7, 8, 9, 10, 11];   // one round per hurricane-season month
   var N_SEEDS = 4;
-  var SEED_BOX = { latMin: 10, latMax: 24, lonMin: -78, lonMax: -20 };
   var SEED_COLORS = ['#00e5ff', '#ffb454', '#38d39f', '#ff5d6c'];
   var SEED_LABELS = ['A', 'B', 'C', 'D'];
   var MONTH_NAMES = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -136,18 +135,45 @@
     return isFinite(k) && (k - 273.15) > 25; // ocean & not too cold
   }
 
+  // Climatological genesis hot-spots by month (N. Atlantic): each a weighted
+  // Gaussian blob {lat, lon, sd, w}. Seeds are sampled from this mixture so they
+  // land in realistic, month-appropriate spots — the cloud migrates from the
+  // Gulf/Caribbean (Jun) to the Main Development Region off Africa (Aug–Sep) and
+  // back to the Caribbean (Oct–Nov). Stochastic, but climatologically weighted.
+  var MONTH_GENESIS = {
+    6:  [{ lat: 25, lon: -90, sd: 3, w: 3 }, { lat: 18, lon: -83, sd: 3, w: 2 }, { lat: 28, lon: -78, sd: 3, w: 2 }, { lat: 14, lon: -60, sd: 3, w: 1 }],
+    7:  [{ lat: 25, lon: -88, sd: 3, w: 2 }, { lat: 16, lon: -70, sd: 3, w: 2 }, { lat: 27, lon: -72, sd: 3, w: 2 }, { lat: 14, lon: -45, sd: 4, w: 2 }, { lat: 13, lon: -30, sd: 3, w: 1 }],
+    8:  [{ lat: 13, lon: -35, sd: 4, w: 3 }, { lat: 12, lon: -23, sd: 3, w: 2 }, { lat: 15, lon: -55, sd: 4, w: 2 }, { lat: 17, lon: -68, sd: 3, w: 2 }, { lat: 25, lon: -88, sd: 3, w: 1.5 }, { lat: 27, lon: -68, sd: 3, w: 1.5 }],
+    9:  [{ lat: 13, lon: -30, sd: 4, w: 3 }, { lat: 14, lon: -45, sd: 4, w: 3 }, { lat: 12, lon: -22, sd: 3, w: 2 }, { lat: 16, lon: -60, sd: 4, w: 2 }, { lat: 18, lon: -72, sd: 3, w: 2 }, { lat: 25, lon: -86, sd: 3, w: 1.5 }, { lat: 28, lon: -66, sd: 3, w: 1.5 }],
+    10: [{ lat: 15, lon: -80, sd: 3, w: 3 }, { lat: 13, lon: -83, sd: 3, w: 2 }, { lat: 18, lon: -68, sd: 3, w: 2 }, { lat: 27, lon: -70, sd: 3, w: 2 }, { lat: 25, lon: -90, sd: 3, w: 1.5 }, { lat: 14, lon: -45, sd: 4, w: 1 }],
+    11: [{ lat: 14, lon: -78, sd: 3, w: 3 }, { lat: 15, lon: -65, sd: 3, w: 2 }, { lat: 27, lon: -62, sd: 4, w: 1.5 }],
+  };
+  function gauss() { return Math.sqrt(-2 * Math.log(Math.random() + 1e-9)) * Math.cos(2 * Math.PI * Math.random()); }
+  function sampleGenesis(month) {
+    var blobs = MONTH_GENESIS[month] || MONTH_GENESIS[9];
+    var tot = 0; blobs.forEach(function (b) { tot += b.w; });
+    var r = Math.random() * tot, b = blobs[0];
+    for (var i = 0; i < blobs.length; i++) { r -= blobs[i].w; if (r <= 0) { b = blobs[i]; break; } }
+    return { lat: b.lat + gauss() * b.sd, lon: b.lon + gauss() * b.sd };
+  }
+  function farEnough(lat, lon) { return seeds.every(function (s) { return Math.hypot(s.lat - lat, s.lon - lon) > 6; }); }
+
   function placeSeeds() {
     seeds = [];
-    var tries = 0;
-    while (seeds.length < N_SEEDS && tries < 500) {
+    var month = dealDate.month, tries = 0;
+    // Sample from the month's genesis climatology (over warm ocean, spread out).
+    while (seeds.length < N_SEEDS && tries < 1000) {
       tries++;
-      var lat = rand(SEED_BOX.latMin, SEED_BOX.latMax);
-      var lon = rand(SEED_BOX.lonMin, SEED_BOX.lonMax);
-      if (!isOcean(lat, lon)) continue;
-      var ok = seeds.every(function (s) {
-        return Math.hypot(s.lat - lat, s.lon - lon) > 6; // spread out
-      });
-      if (ok) seeds.push({ lat: lat, lon: lon });
+      var p = sampleGenesis(month);
+      if (p.lat < 7 || p.lat > 34 || p.lon < -98 || p.lon > -12) continue;  // keep in basin
+      if (!isOcean(p.lat, p.lon) || !farEnough(p.lat, p.lon)) continue;
+      seeds.push({ lat: p.lat, lon: p.lon });
+    }
+    // Fallback (rare): top up with broad random draws if the climatology was stingy.
+    while (seeds.length < N_SEEDS && tries < 1600) {
+      tries++;
+      var lat = rand(9, 26), lon = rand(-90, -22);
+      if (isOcean(lat, lon) && farEnough(lat, lon)) seeds.push({ lat: lat, lon: lon });
     }
     renderSeedMarkers();
     renderSeedList();
@@ -510,68 +536,94 @@
       ' — that’s where the environment was kindest.';
   }
 
+  // Redraw the inset chart (and the expanded one if open).
   function drawIntensityChart() {
-    var cv = $('intensity-chart'), w = cv.width, h = cv.height, ctx = cv.getContext('2d');
-    ctx.clearRect(0, 0, w, h);
-    // Dynamic x-axis: span the longest track in this round (rounded to days).
+    renderChart($('intensity-chart'));
+    if (!$('chart-modal').classList.contains('hidden')) renderChart($('chart-modal-canvas'));
+  }
+
+  // Draw the intensity (+ optional shear) chart crisply into any canvas, scaling
+  // type/line weights to the canvas size so it reads well small or expanded.
+  function renderChart(cv) {
+    if (!results || chosenIdx < 0) return;
+    var dpr = window.devicePixelRatio || 1;
+    var rect = cv.getBoundingClientRect();
+    var w = Math.max(220, Math.round(rect.width)), h = Math.max(120, Math.round(rect.height));
+    cv.width = w * dpr; cv.height = h * dpr;
+    var ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h);
+    var big = w > 520;
+    var fs = big ? 13 : 10, lwV = big ? 3.4 : 2.4;
+    var padL = big ? 40 : 30, padR = big ? 46 : 34, padT = big ? 26 : 12, padB = big ? 26 : 16;
+
     var maxTrackHr = 24;
     results.forEach(function (r) { maxTrackHr = Math.max(maxTrackHr, r.track[r.track.length - 1].hr); });
-    var maxHr = Math.ceil(maxTrackHr / 24) * 24, maxV = 160, maxSh = 40; // maxSh in kt
-    var padL = 28, padB = 16, padT = 8, padR = 6;
+    var maxHr = Math.ceil(maxTrackHr / 24) * 24, maxV = 160, maxSh = 40;
     function X(hr) { return padL + (w - padL - padR) * hr / maxHr; }
     function Y(v) { return padT + (h - padT - padB) * (1 - v / maxV); }
     function Ysh(kt) { return padT + (h - padT - padB) * (1 - kt / maxSh); }
+    ctx.font = fs + 'px Inter, system-ui, sans-serif'; ctx.textBaseline = 'middle';
 
-    ctx.strokeStyle = 'rgba(36,51,82,.85)'; ctx.fillStyle = '#687c9f';
-    ctx.font = '10px Inter, system-ui, sans-serif'; ctx.lineWidth = 1;
+    // Category gridlines + left (intensity) axis.
+    ctx.strokeStyle = 'rgba(36,51,82,.85)'; ctx.fillStyle = '#687c9f'; ctx.lineWidth = 1;
     [34, 64, 96, 137].forEach(function (lv) {
       ctx.beginPath(); ctx.moveTo(padL, Y(lv)); ctx.lineTo(w - padR, Y(lv)); ctx.stroke();
-      ctx.fillText(lv + 'kt', 2, Y(lv) + 3);
+      ctx.textAlign = 'right'; ctx.fillText(lv + ' kt', padL - 5, Y(lv));
     });
 
-    // Optional: shear (kt) the storm experienced, as a neutral dashed line on a
-    // 0-40 kt scale. Kept colour-neutral so it never reads as a V (intensity)
-    // segment, which is coloured by Saffir-Simpson category.
     var showShear = $('tog-track-shear') && $('tog-track-shear').checked;
     var cpts = results[chosenIdx].track;
+
+    // Right (shear) axis ticks, drawn only when the shear line is on.
     if (showShear) {
-      ctx.setLineDash([4, 3]); ctx.strokeStyle = 'rgba(214,224,242,0.85)'; ctx.lineWidth = 1.4;
-      ctx.beginPath();
-      cpts.forEach(function (p, k) {
-        var x = X(p.hr), y = Ysh(p.shear * 1.94384);    // m/s -> kt
-        k ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
-      });
-      ctx.stroke(); ctx.setLineDash([]);
-      ctx.fillStyle = 'rgba(214,224,242,0.95)';
-      ctx.fillText('40kt', w - padR - 22, Ysh(40) + 8); ctx.fillText('shear', w - padR - 32, h - 4);
+      ctx.fillStyle = 'rgba(196,210,236,.8)'; ctx.textAlign = 'left';
+      [0, 20, 40].forEach(function (s) { ctx.fillText(s, w - padR + 5, Ysh(s)); });
     }
 
     // Faint context tracks for the other seeds.
     results.forEach(function (r, i) {
       if (i === chosenIdx) return;
-      ctx.strokeStyle = '#39466a'; ctx.lineWidth = 1; ctx.beginPath();
+      ctx.strokeStyle = 'rgba(57,70,106,.9)'; ctx.lineWidth = big ? 1.4 : 1; ctx.beginPath();
       r.track.forEach(function (p, k) { var x = X(p.hr), yv = Y(p.v); k ? ctx.lineTo(x, yv) : ctx.moveTo(x, yv); });
       ctx.stroke();
     });
 
-    // Soft gradient area fill under the chosen V curve (adds depth).
-    var baseY = Y(0);
-    var grad = ctx.createLinearGradient(0, padT, 0, baseY);
-    grad.addColorStop(0, 'rgba(61,130,246,0.30)');
-    grad.addColorStop(1, 'rgba(61,130,246,0.02)');
+    // Gradient area fill under the chosen V curve.
+    var baseY = Y(0), grad = ctx.createLinearGradient(0, padT, 0, baseY);
+    grad.addColorStop(0, 'rgba(61,130,246,0.30)'); grad.addColorStop(1, 'rgba(61,130,246,0.02)');
     ctx.fillStyle = grad; ctx.beginPath(); ctx.moveTo(X(cpts[0].hr), baseY);
     for (var a = 0; a < cpts.length; a++) ctx.lineTo(X(cpts[a].hr), Y(cpts[a].v));
     ctx.lineTo(X(cpts[cpts.length - 1].hr), baseY); ctx.closePath(); ctx.fill();
 
-    // Chosen storm, colored by intensity.
-    ctx.lineWidth = 2.4; ctx.lineCap = 'round';
+    // Shear (kt) the storm experienced — neutral dashed line (0–40 kt scale).
+    if (showShear) {
+      ctx.setLineDash([5, 4]); ctx.strokeStyle = 'rgba(214,224,242,0.85)'; ctx.lineWidth = big ? 2 : 1.4;
+      ctx.beginPath();
+      cpts.forEach(function (p, k) { var x = X(p.hr), y = Ysh(p.shear * 1.94384); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+      ctx.stroke(); ctx.setLineDash([]);
+    }
+
+    // Chosen storm V, coloured by Saffir–Simpson category.
+    ctx.lineWidth = lwV; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     for (var k = 1; k < cpts.length; k++) {
       ctx.strokeStyle = colorForV(cpts[k].v); ctx.beginPath();
       ctx.moveTo(X(cpts[k - 1].hr), Y(cpts[k - 1].v)); ctx.lineTo(X(cpts[k].hr), Y(cpts[k].v)); ctx.stroke();
     }
-    ctx.fillStyle = '#9fb1d0';
-    ctx.fillText('day 0', X(0) + 2, h - 4);
-    ctx.fillText('day ' + (maxHr / 24), X(maxHr) - 32, h - 4);
+
+    // Day axis (bottom).
+    ctx.fillStyle = '#9fb1d0'; ctx.textAlign = 'left'; ctx.fillText('day 0', X(0), h - padB / 2);
+    ctx.textAlign = 'right'; ctx.fillText('day ' + (maxHr / 24), w - padR, h - padB / 2);
+
+    // Legend (top-left): intensity swatch + shear dash.
+    ctx.textAlign = 'left';
+    var lx = padL, ly = padT - (big ? 14 : 6);
+    ctx.strokeStyle = '#ff9a3c'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(lx + 16, ly); ctx.stroke();
+    ctx.fillStyle = '#9fb1d0'; ctx.fillText('intensity (kt)', lx + 22, ly);
+    if (showShear) {
+      var lx2 = lx + (big ? 130 : 104);
+      ctx.setLineDash([5, 4]); ctx.strokeStyle = 'rgba(214,224,242,0.85)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(lx2, ly); ctx.lineTo(lx2 + 16, ly); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillText('shear (kt)', lx2 + 22, ly);
+    }
   }
 
   // ---- reset ----
@@ -608,6 +660,13 @@
     if (results && chosenIdx >= 0) animateTrack(chosenIdx);
   }
 
+  function openChartModal() {
+    if (!results || chosenIdx < 0) return;
+    $('chart-modal').classList.remove('hidden');
+    renderChart($('chart-modal-canvas'));
+  }
+  function closeChartModal() { $('chart-modal').classList.add('hidden'); }
+
   function showSummary() {
     animToken++;
     var BEST_KEY = 'seedstorm_best_ace';
@@ -631,7 +690,7 @@
     });
 
     $('leaderboard').innerHTML = isBest
-      ? '🏆 New personal best! <b>' + game.totalAce.toFixed(1) + ' ACE</b>'
+      ? '<svg class="lb-ic"><use href="#ic-trophy"/></svg> New personal best! <b>' + game.totalAce.toFixed(1) + ' ACE</b>'
       : 'Personal best: <b>' + Math.max(prevBest, game.totalAce).toFixed(1) + ' ACE</b> &nbsp;·&nbsp; ' +
         '(global leaderboard coming soon)';
     showStage('summary');
@@ -651,6 +710,11 @@
     $('tog-shear').addEventListener('change', function () { if (env) renderShear(); });
     $('tog-mpi').addEventListener('change', function () { if (env) renderMpi(); });
     $('tog-track-shear').addEventListener('change', function () { if (results) drawIntensityChart(); });
+    $('chart-expand').addEventListener('click', openChartModal);
+    $('chart-modal-close').addEventListener('click', closeChartModal);
+    $('chart-modal').addEventListener('click', function (e) { if (e.target === this) closeChartModal(); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeChartModal(); });
+    window.addEventListener('resize', function () { if (results && chosenIdx >= 0) drawIntensityChart(); });
     showStage('intro');
   }
 

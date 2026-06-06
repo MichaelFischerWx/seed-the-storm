@@ -39,6 +39,15 @@
     <symbol id="ic-trophy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>
     </symbol>
+    <symbol id="ic-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="11.5"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+    </symbol>
+    <symbol id="ic-expand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
+    </symbol>
+    <symbol id="ic-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+    </symbol>
   </svg>
 
   <div id="app">
@@ -94,9 +103,12 @@
             beast?</p>
           <ul id="seed-list" class="seed-list"></ul>
           <div class="env-toggles">
-            <label><input type="checkbox" id="tog-flow" checked /> Steering flow</label>
-            <label><input type="checkbox" id="tog-shear" /> Wind shear (kt)</label>
-            <label><input type="checkbox" id="tog-mpi" /> Ocean potential</label>
+            <label><input type="checkbox" id="tog-flow" checked /> Steering flow
+              <span class="info" tabindex="0" data-tip="The deep-layer winds that steer a storm. The flowing particles show where a seed would be carried."><svg class="info-ic"><use href="#ic-info"/></svg></span></label>
+            <label><input type="checkbox" id="tog-shear" /> Wind shear (kt)
+              <span class="info" tabindex="0" data-tip="Change in wind with height. It tilts and ventilates a storm — LOW shear (blue) is favorable, HIGH shear (red) tears storms apart."><svg class="info-ic"><use href="#ic-info"/></svg></span></label>
+            <label><input type="checkbox" id="tog-mpi" /> Ocean potential
+              <span class="info" tabindex="0" data-tip="Maximum potential intensity from the ocean — how strong a storm the warm water can fuel. HIGHER (warm) = more fuel, the storm's ceiling."><svg class="info-ic"><use href="#ic-info"/></svg></span></label>
           </div>
           <button id="run-btn" class="btn btn-primary btn-block" disabled>
             Choose this seed
@@ -107,7 +119,10 @@
         <section id="stage-result" class="stage hidden">
           <div id="verdict" class="verdict"></div>
           <div id="score-line" class="score-line"></div>
-          <canvas id="intensity-chart" width="320" height="160"></canvas>
+          <div class="chart-wrap">
+            <canvas id="intensity-chart" width="320" height="160"></canvas>
+            <button id="chart-expand" class="icon-btn chart-expand" title="Expand chart"><svg class="btn-ic" aria-hidden="true"><use href="#ic-expand"/></svg></button>
+          </div>
           <label class="chart-toggle"><input type="checkbox" id="tog-track-shear" /> Shear along track</label>
           <ul id="result-list" class="result-list"></ul>
           <p id="teach" class="teach"></p>
@@ -129,6 +144,17 @@
         <div id="status" class="status"></div>
       </aside>
     </main>
+  </div>
+
+  <!-- expanded intensity chart -->
+  <div id="chart-modal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-head">
+        <span>Intensity &amp; shear along the chosen storm's track</span>
+        <button id="chart-modal-close" class="icon-btn" title="Close"><svg class="btn-ic" aria-hidden="true"><use href="#ic-close"/></svg></button>
+      </div>
+      <canvas id="chart-modal-canvas"></canvas>
+    </div>
   </div>
 
   <script

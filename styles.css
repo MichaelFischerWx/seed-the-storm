@@ -120,8 +120,47 @@ svg.ic, .brand-mark, .btn-ic, .v-ic { display: inline-block; fill: none; }
 .seed-label { font-weight: 600; }
 .seed-loc { color: var(--ink-faint); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 
-.env-toggles { display: flex; flex-direction: column; gap: 7px; margin: 14px 0 2px; font-size: 13px; color: var(--ink-dim); }
+.env-toggles { display: flex; flex-direction: column; gap: 8px; margin: 14px 0 2px; font-size: 13px; color: var(--ink-dim); }
 .env-toggles label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+
+/* info tooltip */
+.info { position: relative; display: inline-flex; margin-left: auto; color: var(--ink-faint); cursor: help; }
+.info:hover, .info:focus-visible { color: var(--accent-2); outline: none; }
+.info-ic { width: 15px; height: 15px; }
+.info::after {
+  content: attr(data-tip);
+  position: absolute; right: 0; top: 22px; z-index: 700; width: 232px;
+  padding: 9px 11px; border-radius: var(--r-sm);
+  background: #0c1526; border: 1px solid var(--line); color: var(--ink);
+  font-size: 11.5px; line-height: 1.45; font-weight: 400; letter-spacing: 0;
+  box-shadow: var(--sh-2); opacity: 0; transform: translateY(-3px);
+  pointer-events: none; transition: opacity .14s, transform .14s;
+}
+.info:hover::after, .info:focus-visible::after { opacity: 1; transform: none; }
+
+/* small square icon button */
+.icon-btn { display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; padding: 0; border-radius: var(--r-sm);
+  border: 1px solid var(--line); background: rgba(10,17,32,.72); color: var(--ink-dim);
+  cursor: pointer; transition: background .14s, color .14s, border-color .14s; }
+.icon-btn:hover { background: var(--surface-3); color: var(--ink); border-color: #31466e; }
+.icon-btn:focus-visible { outline: none; box-shadow: var(--ring); }
+
+/* chart + expand */
+.chart-wrap { position: relative; }
+.chart-expand { position: absolute; top: 8px; right: 8px; backdrop-filter: blur(4px); }
+
+/* expanded-chart modal */
+.modal { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center;
+  background: rgba(4,8,16,.72); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+.modal-card { width: min(920px, 92vw); background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-lg); box-shadow: var(--sh-2); padding: 16px 18px 18px; }
+.modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;
+  font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 15px; }
+#chart-modal-canvas { width: 100%; height: min(56vh, 460px); background: #0a1322;
+  border: 1px solid var(--line-soft); border-radius: var(--r); }
+
+.lb-ic { width: 16px; height: 16px; vertical-align: -3px; color: var(--good); }
 
 /* ---- Map overlays ---- */
 .map-clock { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 500;
