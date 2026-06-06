@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Seed the Storm — a tropical cyclone ACE game</title>
   <meta name="description" content="An educational tropical-cyclone game: pick the seed that spins up the most ACE, on real ERA5 data + LGEM intensity physics." />
-  <meta name="theme-color" content="#0b1322" />
+  <meta name="theme-color" content="#0C2420" />
   <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
   <link rel="icon" type="image/png" sizes="64x64" href="assets/icon-64.png" />
   <link rel="apple-touch-icon" href="assets/icon-180.png" />
@@ -23,7 +23,7 @@
   <meta name="twitter:image" content="https://michaelfischerwx.github.io/seed-the-storm/assets/og-image.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   <link
     rel="stylesheet"
     href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -78,7 +78,7 @@
       </div>
       <div class="deal-block">
         <div id="deal-info" class="deal-info">
-          <span class="deal-basin">North Atlantic · <span id="round-label">Round 1 / 6</span></span>
+          <span class="deal-basin"><span class="basin-name">North Atlantic · </span><span id="round-label">Round 1 / 6</span></span>
           <span id="deal-date" class="deal-date">—</span>
         </div>
         <div id="score-badge" class="score-badge hidden"><span id="score-badge-val">0.0 ACE</span><span class="info" tabindex="0" data-tip="ACE = Accumulated Cyclone Energy — a storm's total power over its whole life (peak wind² summed every 6 h). A long-lived hurricane outscores a brief intense one."><svg class="info-ic"><use href="#ic-info"/></svg></span></div>
@@ -157,6 +157,16 @@
           <div id="summary-total" class="summary-total"></div>
           <ul id="summary-list" class="result-list"></ul>
           <div id="leaderboard" class="leaderboard"></div>
+          <div id="lb-submit" class="lb-submit hidden">
+            <label class="lb-label" for="lb-name">Add your score to the global board</label>
+            <div class="lb-row">
+              <input id="lb-name" class="lb-input" type="text" maxlength="12" placeholder="Your name"
+                     autocomplete="off" autocapitalize="words" spellcheck="false" />
+              <button id="lb-submit-btn" class="btn btn-primary">Submit</button>
+            </div>
+            <div id="lb-msg" class="lb-msg" aria-live="polite"></div>
+          </div>
+          <ol id="lb-list" class="lb-list hidden"></ol>
           <button id="again-btn" class="btn btn-primary btn-block">Play again</button>
         </section>
 
@@ -183,10 +193,21 @@
   ></script>
   <!-- ERA5 data ships in this repo under data/ (same-origin, zero egress).
        To host the pack elsewhere, set window.SEEDSTORM_DATA = { base: 'https://…' }. -->
+  <!-- Optional GLOBAL leaderboard via Supabase. Create a free project, run
+       supabase_setup.sql, then paste the project URL + anon key below. The anon
+       key is public-safe (writes are guarded by RLS + a server-side profanity
+       trigger). Leave blank to keep scores local-only — the game still works. -->
+  <script>
+    window.SEEDSTORM_SUPABASE = {
+      url: '',      // e.g. 'https://abcdefghijkl.supabase.co'
+      anonKey: ''   // Project Settings → API → anon / public key
+    };
+  </script>
   <script src="js/era5.js"></script>
   <script src="js/mpi.js"></script>
   <script src="js/model.js"></script>
   <script src="js/particles.js"></script>
+  <script src="js/leaderboard.js"></script>
   <script src="js/game.js"></script>
 </body>
 </html>

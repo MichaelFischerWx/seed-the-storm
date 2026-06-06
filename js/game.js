@@ -6,7 +6,7 @@
   var YEARS = []; for (var y = 1991; y <= 2020; y++) YEARS.push(y);
   var ROUND_MONTHS = [6, 7, 8, 9, 10, 11];   // one round per hurricane-season month
   var N_SEEDS = 4;
-  var SEED_COLORS = ['#00e5ff', '#ffb454', '#38d39f', '#ff5d6c'];
+  var SEED_COLORS = ['#5FD0E6', '#E8C26A', '#A98AC7', '#E0795F'];
   var SEED_LABELS = ['A', 'B', 'C', 'D'];
   var MONTH_NAMES = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -16,6 +16,7 @@
   var env = null, seeds = [], results = null, chosenIdx = -1, dealDate = null;
 
   var seedMarkers = [];
+  var attractToken = 0, attractLayer = null, attractCap = null;   // home-screen preview
 
   // ---- DOM ----
   var $ = function (id) { return document.getElementById(id); };
@@ -67,11 +68,12 @@
     // Lock the view to the data band (0–60 °N, all lon) so the field always
     // fills the frame and the edges read as the map's frame, not missing data.
     map = L.map('map', {
-      worldCopyJump: false, minZoom: 3, maxZoom: 8,
+      worldCopyJump: false, minZoom: 4, maxZoom: 8, zoomSnap: 0.5, zoomDelta: 0.5,
       maxBounds: [[0, -180], [60, 180]], maxBoundsViscosity: 1.0,
-    }).setView([28, -52], 4);
+    }).setView([26, -52], 4.5);
+    map.attributionControl.setPrefix(false);   // drop the "Leaflet" + flag prefix
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; OpenStreetMap &copy; CARTO &middot; ERA5 via TC-ATLAS',
+      attribution: '&copy; OSM &middot; CARTO &middot; ERA5/TC-ATLAS',
       subdomains: 'abcd', maxZoom: 8,
     }).addTo(map);
     seedLayer = L.layerGroup().addTo(map);
@@ -187,7 +189,7 @@
       seedMarkers.push(m);
     });
     var grp = L.featureGroup(seedMarkers);
-    if (seedMarkers.length) map.fitBounds(grp.getBounds().pad(0.6), { animate: false });
+    if (seedMarkers.length) map.fitBounds(grp.getBounds().pad(0.25), { animate: false, maxZoom: 5, padding: [24, 24] });
   }
 
   function fmtLoc(s) {
@@ -330,9 +332,9 @@
   }
 
   // On-map colorbar reflecting whichever field is active (title + gradient + ticks).
-  function updateMapLegend() {
+  function updateMapLegend(forceKind) {
     var el = $('map-legend');
-    var kind = $('tog-shear').checked ? 'shear' : ($('tog-mpi').checked ? 'mpi' : null);
+    var kind = forceKind || ($('tog-shear').checked ? 'shear' : ($('tog-mpi').checked ? 'mpi' : null));
     if (!kind) { el.classList.add('hidden'); return; }
     // Shear: diverging blue(favorable)→red(hostile), ticks 0→40.
     // MPI: Turbo heat ramp, low→high (weaker→stronger storms possible), ticks 0→160.
@@ -626,8 +628,80 @@
     }
   }
 
+  // ---- home-screen attract mode ----
+  // Before the first round we show a LIVE sample environment (flowing steering +
+  // shear field for a peak-season date) with the month's genesis hot-spots glowing,
+  // so the landing previews exactly what the player works with — no blank map.
+  function genesisPane() {
+    if (!map.getPane('genesisPane')) {
+      var p = map.createPane('genesisPane'); p.style.zIndex = 360; p.style.pointerEvents = 'none';
+    }
+    return 'genesisPane';
+  }
+  function renderGenesisHints(month) {
+    if (attractLayer) { map.removeLayer(attractLayer); attractLayer = null; }
+    attractLayer = L.layerGroup();
+    (MONTH_GENESIS[month] || []).forEach(function (b) {
+      L.circle([b.lat, b.lon], {
+        pane: genesisPane(), radius: b.sd * 120000, interactive: false,
+        color: '#2DBDA0', weight: 1, opacity: 0.38, dashArray: '3 6',
+        fillColor: '#2DBDA0', fillOpacity: 0.06 + 0.015 * b.w,
+      }).addTo(attractLayer);
+    });
+    attractLayer.addTo(map);
+  }
+  function showAttractCaption(month, year) {
+    hideAttractCaption();
+    attractCap = document.createElement('div');
+    attractCap.className = 'attract-cap';
+    attractCap.innerHTML = '<b>Sample environment · ' + MONTH_NAMES[month] + ' ' + year + '</b>' +
+      '<span class="ac-sub">Green rings mark where storms tend to brew this month. Press <b>Start</b> to play.</span>';
+    $('map').appendChild(attractCap);
+  }
+  function hideAttractCaption() {
+    if (attractCap && attractCap.parentNode) attractCap.parentNode.removeChild(attractCap);
+    attractCap = null;
+  }
+  function stopAttract() {
+    attractToken++;
+    hideAttractCaption();
+    if (attractLayer && map.hasLayer(attractLayer)) map.removeLayer(attractLayer);
+    attractLayer = null;
+  }
+  function startAttract() {
+    var token = ++attractToken;
+    ERA5.loadManifest().then(function (man) {
+      if (token !== attractToken) return null;
+      var year = pick(YEARS), month = 9;                       // Atlantic peak season
+      var key = 'shear/' + year + '_0' + month;
+      var nDays = (man.daily[key] || {}).nDays || 30;
+      var day = Math.min(nDays, 10);
+      return Promise.all([
+        ERA5.loadDailyFieldSpan('steeru', year, month, 1),
+        ERA5.loadDailyFieldSpan('steerv', year, month, 1),
+        ERA5.loadDailyFieldSpan('shear', year, month, 1),
+        ERA5.loadSST(month),
+      ]).then(function (f) {
+        if (token !== attractToken) return;
+        env = { steeru: f[0], steerv: f[1], shear: f[2], sst: f[3], startDayIdx: day - 1 };
+        if (!flowLayer) flowLayer = new ParticleLayer();
+        flowLayer.setField(env).setTime(env.startDayIdx);
+        if (!map.hasLayer(flowLayer)) flowLayer.addTo(map);
+        var url = shearUrlAt(env.startDayIdx);
+        if (shearLayer) shearLayer.setUrl(url);
+        else shearLayer = L.imageOverlay(url, fieldBounds(), { opacity: 0.55, pane: fieldPane() });
+        if (!map.hasLayer(shearLayer)) shearLayer.addTo(map);
+        showCoastlines(true);
+        updateMapLegend('shear');
+        renderGenesisHints(month);
+        showAttractCaption(month, year);
+      });
+    }).catch(function (e) { console.warn('attract preview unavailable:', e && e.message); });
+  }
+
   // ---- reset ----
   function resetRound() {
+    stopAttract();                                  // tear down the home-screen preview
     env = null; seeds = []; results = null; chosenIdx = -1;
     animToken++;                                    // stop any running animation
     if (seedLayer) seedLayer.clearLayers();
@@ -688,11 +762,62 @@
       ul.appendChild(li);
     });
 
-    $('leaderboard').innerHTML = isBest
-      ? '<svg class="lb-ic"><use href="#ic-trophy"/></svg> New personal best! <b>' + game.totalAce.toFixed(1) + ' ACE</b>'
-      : 'Personal best: <b>' + Math.max(prevBest, game.totalAce).toFixed(1) + ' ACE</b> &nbsp;·&nbsp; ' +
-        '(global leaderboard coming soon)';
+    renderLeaderboard(game.totalAce, avgPct, isBest, prevBest);
     showStage('summary');
+  }
+
+  // ---- leaderboard (optional global board via Supabase; see js/leaderboard.js) ----
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function renderLbList(rows, hiName, hiAce) {
+    var ol = $('lb-list');
+    if (!rows || !rows.length) { ol.classList.add('hidden'); ol.innerHTML = ''; return; }
+    ol.innerHTML = rows.map(function (r, i) {
+      var me = hiName && r.name === hiName && Math.abs(r.ace - hiAce) < 0.05;
+      return '<li class="lb-entry' + (me ? ' me' : '') + '">' +
+        '<span class="lb-rank">' + (i + 1) + '</span>' +
+        '<span class="lb-name">' + escapeHtml(r.name) + '</span>' +
+        '<span class="lb-ace">' + Number(r.ace).toFixed(1) + ' ACE</span></li>';
+    }).join('');
+    ol.classList.remove('hidden');
+  }
+  function renderLeaderboard(total, avgPct, isBest, prevBest) {
+    // Personal best line (always shown — works with no backend).
+    $('leaderboard').innerHTML = isBest
+      ? '<svg class="lb-ic"><use href="#ic-trophy"/></svg> New personal best! <b>' + total.toFixed(1) + ' ACE</b>'
+      : 'Personal best: <b>' + Math.max(prevBest, total).toFixed(1) + ' ACE</b>';
+
+    var sub = $('lb-submit');
+    if (!window.Leaderboard || !Leaderboard.configured()) {
+      sub.classList.add('hidden'); $('lb-list').classList.add('hidden'); return;
+    }
+    sub.classList.remove('hidden'); sub.classList.remove('done');
+    var msg = $('lb-msg'); msg.textContent = ''; msg.className = 'lb-msg';
+    var nm = $('lb-name'); nm.value = ''; nm.disabled = false;
+    $('lb-submit-btn').disabled = false;
+    Leaderboard.top(20).then(function (rows) { renderLbList(rows); });
+  }
+  function submitScore() {
+    if (!window.Leaderboard || !Leaderboard.configured() || $('lb-name').disabled) return;
+    var name = $('lb-name').value, msg = $('lb-msg');
+    var err = Leaderboard.validName(name);
+    if (err) { msg.textContent = err; msg.className = 'lb-msg err'; return; }
+    $('lb-submit-btn').disabled = true;
+    msg.textContent = 'Submitting…'; msg.className = 'lb-msg';
+    var avgPct = Math.round(game.total / ROUNDS);
+    Leaderboard.submit(name, game.totalAce, avgPct).then(function () {
+      msg.textContent = 'Added to the board!'; msg.className = 'lb-msg ok';
+      $('lb-submit').classList.add('done'); $('lb-name').disabled = true;
+      return Leaderboard.top(20);
+    }).then(function (rows) {
+      renderLbList(rows, name.trim(), Number(game.totalAce.toFixed(1)));
+    }).catch(function (e) {
+      msg.textContent = e.message || 'Could not submit.'; msg.className = 'lb-msg err';
+      $('lb-submit-btn').disabled = false;
+    });
   }
 
   // ---- wire up ----
@@ -704,6 +829,8 @@
     $('next-btn').addEventListener('click', nextOrFinish);  // "Next round" / "See final results"
     $('replay-btn').addEventListener('click', replayAnimation);
     $('again-btn').addEventListener('click', startGame);    // summary -> play again
+    $('lb-submit-btn').addEventListener('click', submitScore);
+    $('lb-name').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); submitScore(); } });
     // Independent layers: flow (base) + optional shear contours + optional MPI.
     $('tog-flow').addEventListener('change', function () { if (env) renderFlow(); });
     $('tog-shear').addEventListener('change', function () { if (env) renderShear(); });
@@ -713,8 +840,12 @@
     $('chart-modal-close').addEventListener('click', closeChartModal);
     $('chart-modal').addEventListener('click', function (e) { if (e.target === this) closeChartModal(); });
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeChartModal(); });
-    window.addEventListener('resize', function () { if (results && chosenIdx >= 0) drawIntensityChart(); });
+    window.addEventListener('resize', function () {
+      if (map) map.invalidateSize({ animate: false });   // keep the map filling its box on rotate/resize
+      if (results && chosenIdx >= 0) drawIntensityChart();
+    });
     showStage('intro');
+    startAttract();   // live sample environment behind the "How to play" intro
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
