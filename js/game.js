@@ -34,6 +34,7 @@
   // ---- state ----
   var map, seedLayer, trackLayer, mpiLayer = null, flowLayer = null, shearLayer = null;
   var env = null, seeds = [], results = null, chosenIdx = -1, dealDate = null;
+  var viewIdx = -1;   // which seed's evolution is being VISUALISED (≠ chosenIdx, which is locked for scoring)
 
   var seedMarkers = [];
   var attractToken = 0, attractLayer = null, attractCap = null;   // home-screen preview
@@ -287,7 +288,8 @@
     seedLayer.clearLayers(); seedMarkers = [];
     seeds.forEach(function (s, i) {
       var m = L.marker([s.lat, s.lon], { icon: seedIcon(i, false) }).addTo(seedLayer);
-      m.on('click', function () { selectSeed(i); });
+      // Before the run: pick this seed. After the reveal: watch its storm.
+      m.on('click', function () { if (results) viewSeed(i); else selectSeed(i); });
       seedMarkers.push(m);
     });
     // Frame ALL seeds with comfortable margins, leaving room for the top clock
@@ -320,6 +322,7 @@
   }
 
   function selectSeed(i) {
+    if (results) return;        // round already run — the pick is locked (use viewSeed to watch others)
     chosenIdx = i;
     seedMarkers.forEach(function (m, k) { m.setIcon(seedIcon(k, k === i)); });
     Array.prototype.forEach.call($('seed-list').children, function (li, k) {
@@ -534,12 +537,29 @@
     }
   }
 
+  // Switch the VISUALISATION to another seed's storm (map animation + intensity
+  // chart) without touching the score — lets the player compare evolutions after
+  // the round is locked in.
+  function viewSeed(k) {
+    if (!results || k < 0 || k >= results.length || k === viewIdx) return;
+    markViewing(k);
+    drawIntensityChart();   // redraw with seed k as the bold curve (renderChart reads viewIdx)
+    animateTrack(k);        // replay seed k on the map
+  }
+  function markViewing(k) {
+    viewIdx = k;
+    Array.prototype.forEach.call($('result-list').children, function (li) {
+      li.classList.toggle('viewing', Number(li.dataset.idx) === viewIdx);
+    });
+  }
+
   var HRS_PER_FRAME = 0.7;   // ~1 day per ~1.1 s at 30 fps
   var FRAME_MS = 33;
   var SHEAR_REBUILD_HR = 12; // re-shade shear every 12 sim-hours
 
   function animateTrack(i) {
     var token = ++animToken;                 // supersede any running animation
+    viewIdx = i;                             // this seed is now the one being visualised
     trackLayer.clearLayers();
     results.forEach(function (r, k) { if (k !== i) drawTrackPolyline(k, null, true); });
 
@@ -650,17 +670,22 @@
     $('next-btn').textContent = game.round < ROUNDS ? 'Next round →' : 'See final results';
     if (game.round < ROUNDS) prefetchNext();   // warm the next round's fields while the player reads
 
+    viewIdx = chosenIdx;   // start by viewing your own pick; tapping a row switches the view
+    $('result-hint').classList.remove('hidden');
     var ul = $('result-list'); ul.innerHTML = '';
     results.map(function (r, i) { return { r: r, i: i }; })
       .sort(function (a, b2) { return objVal(b2.r) - objVal(a.r); })   // rank by the objective
       .forEach(function (o) {
         var r = o.r, i = o.i, li = document.createElement('li');
-        li.className = 'result-item' + (i === bi ? ' best' : '') + (i === chosenIdx ? ' chosen' : '');
+        li.className = 'result-item' + (i === bi ? ' best' : '') + (i === chosenIdx ? ' chosen' : '') +
+          (i === viewIdx ? ' viewing' : '');
+        li.dataset.idx = i;
         li.innerHTML = '<span class="seed-dot" style="background:' + SEED_COLORS[i] + '"></span>' +
           '<span><b>Seed ' + SEED_LABELS[i] + '</b> ' +
           '<span class="result-tag">peak ' + (r.peakCat.length === 1 ? 'Cat ' : '') + r.peakCat +
           ' · ' + Math.round(r.peakV) + ' kt</span></span>' +
           '<span class="result-ace">' + (vmax ? Math.round(r.peakV) + ' kt' : r.ace.toFixed(1) + ' ACE') + '</span>';
+        li.addEventListener('click', function () { viewSeed(i); });   // watch this seed's storm (score stays locked)
         ul.appendChild(li);
       });
 
@@ -868,6 +893,7 @@
   // type/line weights to the canvas size so it reads well small or expanded.
   function renderChart(cv) {
     if (!results || chosenIdx < 0) return;
+    var vi = viewIdx >= 0 ? viewIdx : chosenIdx;   // the seed whose curve is bold (may differ from the pick)
     var dpr = window.devicePixelRatio || 1;
     var rect = cv.getBoundingClientRect();
     var w = Math.max(220, Math.round(rect.width)), h = Math.max(120, Math.round(rect.height));
@@ -896,7 +922,7 @@
 
     var showShear = $('tog-track-shear') && $('tog-track-shear').checked;
     var showMpi = $('tog-track-mpi') && $('tog-track-mpi').checked;
-    var cpts = results[chosenIdx].track;
+    var cpts = results[vi].track;
 
     // Right (shear) axis ticks, drawn only when the shear line is on.
     if (showShear) {
@@ -906,7 +932,7 @@
 
     // Faint context tracks for the other seeds.
     results.forEach(function (r, i) {
-      if (i === chosenIdx) return;
+      if (i === vi) return;
       ctx.strokeStyle = 'rgba(57,70,106,.9)'; ctx.lineWidth = big ? 1.4 : 1; ctx.beginPath();
       r.track.forEach(function (p, k) { var x = X(p.hr), yv = Y(p.v); k ? ctx.lineTo(x, yv) : ctx.moveTo(x, yv); });
       ctx.stroke();
@@ -1043,7 +1069,7 @@
   // ---- reset ----
   function resetRound() {
     stopAttract();                                  // tear down the home-screen preview
-    env = null; seeds = []; results = null; chosenIdx = -1;
+    env = null; seeds = []; results = null; chosenIdx = -1; viewIdx = -1;
     animToken++;                                    // stop any running animation
     if (seedLayer) seedLayer.clearLayers();
     if (trackLayer) trackLayer.clearLayers();
@@ -1097,7 +1123,8 @@
   }
 
   function replayAnimation() {
-    if (results && chosenIdx >= 0) animateTrack(chosenIdx);
+    // Replay whichever seed is currently being viewed (defaults to your pick).
+    if (results && chosenIdx >= 0) animateTrack(viewIdx >= 0 ? viewIdx : chosenIdx);
   }
 
   function openChartModal() {
@@ -1374,6 +1401,7 @@
       catLabel(r.peakCat) + ') &nbsp;·&nbsp; <b>' + r.ace.toFixed(1) + ' ACE</b>';
     renderClimoLine(r);
     $('result-list').innerHTML = '';
+    $('result-hint').classList.add('hidden');   // single shared storm — nothing else to compare against
     var cmp = $('compare'); if (cmp) { cmp.classList.add('hidden'); cmp.innerHTML = ''; }   // no head-to-head for a lone storm
     $('teach').innerHTML = 'This storm ' + describe(r) + '.';
     $('share-storm-btn').classList.add('hidden');     // (re-sharing handled from a fresh game)

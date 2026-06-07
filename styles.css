@@ -263,6 +263,13 @@ svg.ic, .brand-mark, .btn-ic, .v-ic { display: inline-block; fill: none; }
 
 .result-item.best { border-color: rgba(45,189,160,.55); }
 .result-item.chosen { box-shadow: 0 0 0 1px var(--accent-2) inset, var(--sh-1); }
+/* result rows are tappable after the reveal to watch another seed's storm */
+.result-item { cursor: pointer; transition: border-color .14s, background .14s, transform .04s; }
+.result-item:hover { border-color: var(--line-bright); background: var(--surface-3); }
+.result-item:active { transform: translateY(1px); }
+.result-item.viewing { border-color: var(--accent-2); background: var(--glow-soft);
+  box-shadow: inset 3px 0 0 var(--accent-2), var(--sh-1); }
+.result-hint { font-size: 11.5px; color: var(--ink-faint); margin: 2px 0 4px; }
 .result-ace { margin-left: auto; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
 .result-tag { font-size: 11px; color: var(--ink-faint); }
 .teach { font-size: 12.8px; line-height: 1.6; color: var(--ink-dim);
