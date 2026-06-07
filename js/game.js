@@ -1215,7 +1215,7 @@
       var me = lbMine && lbMine.mode === lbViewMode && lbMine.objective === boardObj &&
         r.name === lbMine.name && Math.abs(lbCell(r) - lbMine[lbBoard]) < tol;
       return '<li class="lb-entry' + (me ? ' me' : '') + '">' +
-        '<span class="lb-rank">' + (i + 1) + '</span>' +
+        '<span class="lb-pos">' + (i + 1) + '</span>' +
         '<span class="lb-name">' + escapeHtml(r.name) + '</span>' +
         '<span class="lb-ace">' + lbFmt(lbCell(r)) + '</span></li>';
     }).join('');
