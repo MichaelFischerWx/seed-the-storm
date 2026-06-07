@@ -132,19 +132,22 @@
       // Environment at the current point.
       var shear = ERA5.sampleTime(env.shear, dayFloat, lat, lon);
       if (!isFinite(shear)) shear = 0;
-      var pi = MPI.atPoint(env.sst, lat, lon);
-      // Land fraction from the high-res (0.1°) mask if present; else fall back to
-      // the coarse 1° SST land flag. Resolves small islands the 1° SST misses.
+      // Real gridded potential intensity (kt) for this year-month — carries the
+      // year's warm/cool anomaly (replaces the old empirical DeMaria-Kaplan).
+      // NaN over land/cold → treat as 0 (drives the decay branch).
+      var mpiKt = env.mpi ? ERA5.bilinear(env.mpi.values, env.mpi.grid, lat, lon) : (MPI.atPoint(env.sst, lat, lon).mpi);
+      if (!isFinite(mpiKt)) mpiKt = 0;
+      // Land fraction from the high-res (0.1°) mask if present.
       var lf = 0;
       if (env.landmask) {
         lf = ERA5.bilinear(env.landmask.values, env.landmask.grid, lat, lon);
         lf = isFinite(lf) ? Math.max(0, Math.min(1, lf)) : 0;
-      } else if (pi.land) { lf = 1; }
+      }
       var onLand = lf >= 0.5;
       maxShear = Math.max(maxShear, shear);
 
       track.push({ hr: hr, lat: lat, lon: lon, v: v, cat: catOf(v),
-                   shear: shear, mpi: pi.mpi, landFrac: lf, sstC: pi.sstC, land: onLand });
+                   shear: shear, mpi: mpiKt, landFrac: lf, land: onLand });
 
       if (v >= ACE_MIN) everStorm = true;
       if (everStorm && hr % 6 === 0) ace += v * v;   // 6-hourly ACE
@@ -159,13 +162,13 @@
       if (onLand) madeLandfall = true;
       var landDV = -ALPHA_LAND * (v - V_B);
       var waterDV;
-      if (pi.mpi < MPI_MIN) {
+      if (mpiKt < MPI_MIN) {
         waterDV = -ALPHA_LAND * (v - V_B);     // cold / no-MPI water also decays
       } else {
         // kappa(shear) goes negative above SHEAR_ZERO so the storm weakens
         // smoothly — storms begin to decay around 12–15 m/s of shear.
         var kappa = Math.max(KAPPA_MIN, KMAX - KS * shear) / 24; // h^-1
-        var mort = BETA * v * Math.pow(v / pi.mpi, N_EXP);
+        var mort = BETA * v * Math.pow(v / mpiKt, N_EXP);
         waterDV = kappa * v - mort;
       }
       var dV = (1 - lf) * waterDV + lf * landDV;

@@ -25,7 +25,8 @@
   // mix a cached old manifest with new tiles (vmin/vmax mismatch → garbage decode).
   // v2 = environmental (850-mb vortex-removed) shear/steering pack.
   // v3 = added 0.1° land-fraction mask (manifest gained a 'landmask' entry).
-  var DV = '?v=' + (CFG.version || '3');
+  // v4 = added gridded per-year-month MPI (manifest gained an 'mpi' entry).
+  var DV = '?v=' + (CFG.version || '4');
 
   var NAN = 0xFFFF;
   var _manifest = null;     // Promise<manifest>
@@ -99,6 +100,19 @@
     });
   }
 
+  // Gridded potential intensity (kt) for a specific year-month — the real
+  // (tcpyPI-style) MPI, so the intensity ceiling carries that year's anomaly.
+  function loadMPI(year, month) {
+    return loadManifest().then(function (man) {
+      var key = year + '_' + pad2(month);
+      var t = man.mpi && man.mpi[key];
+      if (!t) return null;
+      return fetchDecode(BASE + '/mpi/' + key + '.bin.gz' + DV, t.vmin, t.vmax).then(function (values) {
+        return { values: values, grid: man.grid };
+      });
+    });
+  }
+
   // High-resolution (0.1°) land-fraction grid for graded land decay (independent
   // of the coarse 1° SST). Resolves small islands. Returns null if absent.
   function loadLandMask() {
@@ -155,6 +169,7 @@
     loadDailyField: loadDailyField,
     loadDailyFieldSpan: loadDailyFieldSpan,
     loadSST: loadSST,
+    loadMPI: loadMPI,
     loadLandMask: loadLandMask,
     fetchDecode: fetchDecode,
     bilinear: bilinear,

@@ -153,9 +153,10 @@
         ERA5.loadDailyFieldSpan('shear', year, month, 2),
         ERA5.loadSST(month),
         ERA5.loadLandMask(),
+        ERA5.loadMPI(year, month),
       ]).then(function (f) {
         env = { steeru: f[0], steerv: f[1], shear: f[2],
-                sst: f[3], landmask: f[4], startDayIdx: startDayIdx, excludeEPac: !!basin.excludeEPac };
+                sst: f[3], landmask: f[4], mpi: f[5], startDayIdx: startDayIdx, excludeEPac: !!basin.excludeEPac };
         placeSeeds();
         renderFlow();
         renderShear();
@@ -437,7 +438,10 @@
     var on = $('tog-mpi').checked;
     if (on && shearLayer && map.hasLayer(shearLayer)) { $('tog-shear').checked = false; map.removeLayer(shearLayer); }
     if (!on) { if (mpiLayer && map.hasLayer(mpiLayer)) map.removeLayer(mpiLayer); afterFieldToggle(); return; }
-    var url = shadeFieldUrl(function (lat, lon) { return MPI.atPoint(env.sst, lat, lon); }, mpiShade);
+    var url = shadeFieldUrl(function (lat, lon) {
+      var v = env.mpi ? ERA5.bilinear(env.mpi.values, env.mpi.grid, lat, lon) : MPI.atPoint(env.sst, lat, lon).mpi;
+      return { mpi: isFinite(v) ? v : 0, land: !isFinite(v) };
+    }, mpiShade);
     if (mpiLayer) mpiLayer.setUrl(url);
     else mpiLayer = L.imageOverlay(url, fieldBounds(), { opacity: 0.55, pane: fieldPane() });
     if (!map.hasLayer(mpiLayer)) mpiLayer.addTo(map);
