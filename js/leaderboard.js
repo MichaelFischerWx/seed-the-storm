@@ -58,15 +58,17 @@
 
   // ---- REST ----
   // metric: 'total' (whole-game ACE) or 'storm' (best single-storm ACE).
-  function top(metric, n) {
+  // mode: which basin board ('atl'|'epac'|'wpac'|'nio'|'nh').
+  function top(metric, mode, n) {
     if (!ok) return Promise.resolve([]);
     var col = metric === 'storm' ? 'best_storm_ace' : 'total_ace';
-    var url = BASE + '?select=name,total_ace,best_storm_ace&order=' + col + '.desc,created_at.asc&limit=' + (n || 20);
+    var url = BASE + '?select=name,total_ace,best_storm_ace&mode=eq.' + encodeURIComponent(mode || 'atl') +
+      '&order=' + col + '.desc,created_at.asc&limit=' + (n || 20);
     return fetch(url, { headers: headers() })
       .then(function (r) { return r.ok ? r.json() : []; })
       .catch(function () { return []; });
   }
-  function submit(name, totalAce, bestStormAce, avgPct) {
+  function submit(name, totalAce, bestStormAce, avgPct, mode) {
     if (!ok) return Promise.reject(new Error('Leaderboard not configured.'));
     var err = validName(name);
     if (err) return Promise.reject(new Error(err));
@@ -75,6 +77,7 @@
       headers: headers({ 'Content-Type': 'application/json', Prefer: 'return=representation' }),
       body: JSON.stringify({
         name: name.trim(),
+        mode: mode || 'atl',
         total_ace: Number(totalAce.toFixed(1)),
         best_storm_ace: Number(bestStormAce.toFixed(1)),
         avg_pct: Math.round(avgPct),

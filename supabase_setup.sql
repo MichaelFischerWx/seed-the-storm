@@ -9,7 +9,8 @@
 --     (The anon key is meant to be public; safety comes from RLS + the trigger below.)
 --
 --  WHAT THIS DOES
---  - scores table: name, total_ace, best_storm_ace, avg_pct, created_at.
+--  - scores table: name, mode, total_ace, best_storm_ace, avg_pct, created_at.
+--    (mode = which basin: atl / epac / wpac / nio / nh; one leaderboard per mode.)
 --  - Row-Level Security: anyone may READ and INSERT; nobody may UPDATE/DELETE
 --    (you can still delete rows yourself from the dashboard to moderate).
 --  - A BEFORE INSERT trigger validates length/characters AND rejects profanity
@@ -24,16 +25,17 @@
 create table if not exists public.scores (
   id             bigint generated always as identity primary key,
   name           text not null,
+  mode           text not null default 'atl' check (mode in ('atl','epac','wpac','nio','nh')),
   total_ace      numeric(6,1) not null check (total_ace >= 0 and total_ace <= 300),
   best_storm_ace numeric(6,1) not null check (best_storm_ace >= 0 and best_storm_ace <= 100),
   avg_pct        int check (avg_pct between 0 and 100),
   created_at     timestamptz not null default now()
 );
 
--- Two leaderboards from one table: highest total ACE (the whole 6-round game)
--- and highest single-storm ACE (the best individual storm in that game).
-create index if not exists scores_total_idx on public.scores (total_ace desc, created_at asc);
-create index if not exists scores_storm_idx on public.scores (best_storm_ace desc, created_at asc);
+-- Per-basin leaderboards: highest total ACE (whole game) and highest single-storm
+-- ACE, each filtered by mode (atl / epac / wpac / nio / nh = Random NH).
+create index if not exists scores_total_idx on public.scores (mode, total_ace desc, created_at asc);
+create index if not exists scores_storm_idx on public.scores (mode, best_storm_ace desc, created_at asc);
 
 -- Normalize a name for matching: lowercase → de-leetspeak → letters only.
 -- Mirrors norm() in js/leaderboard.js.

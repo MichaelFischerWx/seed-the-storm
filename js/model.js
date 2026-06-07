@@ -125,9 +125,9 @@
     for (var hr = 0; hr <= HORIZON_HR; hr += DT_HR) {
       var dayFloat = env.startDayIdx + hr / 24;
 
-      // If the storm has crossed into the East Pacific, it has left the Atlantic
-      // basin — stop here (no further track or ACE counts for this game).
-      if (inEastPacific(lat, lon)) { endReason = 'left-basin'; break; }
+      // Atlantic mode only: if the storm crosses into the East Pacific it has
+      // left the basin — stop (its ACE there belongs to a different basin).
+      if (env.excludeEPac && inEastPacific(lat, lon)) { endReason = 'left-basin'; break; }
 
       // Environment at the current point.
       var shear = ERA5.sampleTime(env.shear, dayFloat, lat, lon);

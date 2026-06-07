@@ -4,12 +4,31 @@
 
   // ---- config ----
   var YEARS = []; for (var y = 1991; y <= 2020; y++) YEARS.push(y);
-  var ROUND_MONTHS = [6, 7, 8, 9, 10, 11];   // one round per hurricane-season month
   var N_SEEDS = 4;
   var SEED_COLORS = ['#5FD0E6', '#E8C26A', '#A98AC7', '#E0795F'];
   var SEED_LABELS = ['A', 'B', 'C', 'D'];
   var MONTH_NAMES = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  // Northern-Hemisphere basins. `months` = the 6 rounds' months (data currently
+  // supports Jun–Nov start months for all basins; NIO's true Apr–Jun/Oct–Dec
+  // season drops in here once the pack is extended). `box` bounds seed placement;
+  // `excludeEPac` makes Atlantic storms that cross into the East Pacific stop
+  // counting (their ACE belongs to a different basin). `view` frames the map.
+  var BASINS = {
+    atl:  { key: 'atl',  name: 'N. Atlantic', short: 'ATL',  months: [6, 7, 8, 9, 10, 11],
+            box: { latMin: 7, latMax: 34, lonMin: -98, lonMax: -12 }, view: { center: [24, -54], zoom: 4.4 }, excludeEPac: true },
+    epac: { key: 'epac', name: 'E. Pacific',  short: 'EPAC', months: [6, 7, 8, 9, 10, 11],
+            box: { latMin: 8, latMax: 24, lonMin: -138, lonMax: -92 }, view: { center: [15, -114], zoom: 4.3 } },
+    wpac: { key: 'wpac', name: 'W. Pacific',  short: 'WPAC', months: [6, 7, 8, 9, 10, 11],
+            box: { latMin: 5, latMax: 30, lonMin: 122, lonMax: 168 }, view: { center: [18, 142], zoom: 4.1 } },
+    nio:  { key: 'nio',  name: 'N. Indian',   short: 'NIO',  months: [6, 7, 8, 9, 10, 11],
+            box: { latMin: 6, latMax: 23, lonMin: 55, lonMax: 95 }, view: { center: [14, 76], zoom: 4.6 } },
+  };
+  var BASIN_KEYS = ['atl', 'epac', 'wpac', 'nio'];
+  var MODE_LABEL = { atl: 'Atlantic', epac: 'E. Pacific', wpac: 'W. Pacific', nio: 'N. Indian', nh: 'Random NH' };
+  var MODES = ['atl', 'epac', 'wpac', 'nio', 'nh'];
+  var selectedMode = 'atl';
 
   // ---- state ----
   var map, seedLayer, trackLayer, mpiLayer = null, flowLayer = null, shearLayer = null;
@@ -24,9 +43,9 @@
   var stages = { intro: $('stage-intro'), pick: $('stage-pick'),
                  result: $('stage-result'), summary: $('stage-summary') };
 
-  // ---- game state (one round per hurricane-season month, June–November) ----
-  var ROUNDS = ROUND_MONTHS.length;   // 6
-  var game = { round: 0, year: 0, total: 0, totalAce: 0, rows: [] };
+  // ---- game state (6 rounds, one per in-season month) ----
+  var ROUNDS = 6;
+  var game = { round: 0, year: 0, total: 0, totalAce: 0, rows: [], mode: 'atl' };
   var animToken = 0;   // invalidates a superseded animation loop
 
   function showStage(name) {
@@ -95,17 +114,27 @@
   function dealRound() {
     status('Dealing… fetching ERA5 fields');
     resetRound();
-    // Month is fixed by the round (Jun→Nov); the year is random each round, so
-    // each round is an independent real example of that month's climatology.
-    var year = pick(YEARS), month = ROUND_MONTHS[game.round - 1];
+    // Pick the basin for this round. Fixed-basin modes step through that basin's
+    // 6 months in order; Random-NH mode draws a random basin + month each round.
+    var basin, month;
+    if (game.mode === 'nh') {
+      basin = BASINS[pick(BASIN_KEYS)];
+      month = pick(basin.months);
+    } else {
+      basin = BASINS[game.mode];
+      month = basin.months[game.round - 1];
+    }
+    var year = pick(YEARS);
     $('round-label').textContent = 'Round ' + game.round + ' / ' + ROUNDS + ' · ' + MONTH_NAMES[month];
+    $('basin-name').textContent = basin.name + ' · ';
 
     ERA5.loadManifest().then(function (man) {
       var nDays = man.daily['shear/' + year + '_' + (month < 10 ? '0' : '') + month].nDays;
       var day = 1 + ((Math.random() * nDays) | 0);
       var startDayIdx = day - 1;
-      dealDate = { year: year, month: month, day: day };
+      dealDate = { year: year, month: month, day: day, basin: basin.key };
       elDealDate.textContent = MONTH_NAMES[month] + ' ' + day + ', ' + year;
+      if (basin.view) map.setView(basin.view.center, basin.view.zoom, { animate: false });
 
       // Load this month + the next so a storm can be integrated across the
       // month boundary until it dissipates, on a contiguous time axis.
@@ -117,7 +146,7 @@
         ERA5.loadSST(month),
       ]).then(function (f) {
         env = { steeru: f[0], steerv: f[1], shear: f[2],
-                sst: f[3], startDayIdx: startDayIdx };
+                sst: f[3], startDayIdx: startDayIdx, excludeEPac: !!basin.excludeEPac };
         placeSeeds();
         renderFlow();
         renderShear();
@@ -137,22 +166,51 @@
     return isFinite(k) && (k - 273.15) > 25; // ocean & not too cold
   }
 
-  // Climatological genesis hot-spots by month (N. Atlantic): each a weighted
-  // Gaussian blob {lat, lon, sd, w}. Seeds are sampled from this mixture so they
-  // land in realistic, month-appropriate spots — the cloud migrates from the
-  // Gulf/Caribbean (Jun) to the Main Development Region off Africa (Aug–Sep) and
-  // back to the Caribbean (Oct–Nov). Stochastic, but climatologically weighted.
-  var MONTH_GENESIS = {
-    6:  [{ lat: 25, lon: -90, sd: 3, w: 3 }, { lat: 18, lon: -83, sd: 3, w: 2 }, { lat: 28, lon: -78, sd: 3, w: 2 }, { lat: 14, lon: -60, sd: 3, w: 1 }],
-    7:  [{ lat: 25, lon: -88, sd: 3, w: 2 }, { lat: 16, lon: -70, sd: 3, w: 2 }, { lat: 27, lon: -72, sd: 3, w: 2 }, { lat: 14, lon: -45, sd: 4, w: 2 }, { lat: 13, lon: -30, sd: 3, w: 1 }],
-    8:  [{ lat: 13, lon: -35, sd: 4, w: 3 }, { lat: 12, lon: -23, sd: 3, w: 2 }, { lat: 15, lon: -55, sd: 4, w: 2 }, { lat: 17, lon: -68, sd: 3, w: 2 }, { lat: 25, lon: -88, sd: 3, w: 1.5 }, { lat: 27, lon: -68, sd: 3, w: 1.5 }],
-    9:  [{ lat: 13, lon: -30, sd: 4, w: 3 }, { lat: 14, lon: -45, sd: 4, w: 3 }, { lat: 12, lon: -22, sd: 3, w: 2 }, { lat: 16, lon: -60, sd: 4, w: 2 }, { lat: 18, lon: -72, sd: 3, w: 2 }, { lat: 25, lon: -86, sd: 3, w: 1.5 }, { lat: 28, lon: -66, sd: 3, w: 1.5 }],
-    10: [{ lat: 15, lon: -80, sd: 3, w: 3 }, { lat: 13, lon: -83, sd: 3, w: 2 }, { lat: 18, lon: -68, sd: 3, w: 2 }, { lat: 27, lon: -70, sd: 3, w: 2 }, { lat: 25, lon: -90, sd: 3, w: 1.5 }, { lat: 14, lon: -45, sd: 4, w: 1 }],
-    11: [{ lat: 14, lon: -78, sd: 3, w: 3 }, { lat: 15, lon: -65, sd: 3, w: 2 }, { lat: 27, lon: -62, sd: 4, w: 1.5 }],
+  // Climatological genesis hot-spots by basin & month: each a weighted Gaussian
+  // blob {lat, lon, sd, w}. Seeds are drawn from this mixture so they land in
+  // realistic, month-appropriate spots. Approximate (educational weighting), not
+  // an official climatology. ATL migrates Gulf/Caribbean (Jun) → MDR off Africa
+  // (Aug–Sep) → Caribbean (Oct–Nov); EPAC sits off Mexico/Cent. America; WPAC in
+  // the monsoon trough 125–160°E; NIO in the Bay of Bengal + Arabian Sea (sparse
+  // in the Jul–Aug monsoon, active Oct–Nov post-monsoon).
+  var BASIN_GENESIS = {
+    atl: {
+      6:  [{ lat: 25, lon: -90, sd: 3, w: 3 }, { lat: 18, lon: -83, sd: 3, w: 2 }, { lat: 28, lon: -78, sd: 3, w: 2 }, { lat: 14, lon: -60, sd: 3, w: 1 }],
+      7:  [{ lat: 25, lon: -88, sd: 3, w: 2 }, { lat: 16, lon: -70, sd: 3, w: 2 }, { lat: 27, lon: -72, sd: 3, w: 2 }, { lat: 14, lon: -45, sd: 4, w: 2 }, { lat: 13, lon: -30, sd: 3, w: 1 }],
+      8:  [{ lat: 13, lon: -35, sd: 4, w: 3 }, { lat: 12, lon: -23, sd: 3, w: 2 }, { lat: 15, lon: -55, sd: 4, w: 2 }, { lat: 17, lon: -68, sd: 3, w: 2 }, { lat: 25, lon: -88, sd: 3, w: 1.5 }, { lat: 27, lon: -68, sd: 3, w: 1.5 }],
+      9:  [{ lat: 13, lon: -30, sd: 4, w: 3 }, { lat: 14, lon: -45, sd: 4, w: 3 }, { lat: 12, lon: -22, sd: 3, w: 2 }, { lat: 16, lon: -60, sd: 4, w: 2 }, { lat: 18, lon: -72, sd: 3, w: 2 }, { lat: 25, lon: -86, sd: 3, w: 1.5 }, { lat: 28, lon: -66, sd: 3, w: 1.5 }],
+      10: [{ lat: 15, lon: -80, sd: 3, w: 3 }, { lat: 13, lon: -83, sd: 3, w: 2 }, { lat: 18, lon: -68, sd: 3, w: 2 }, { lat: 27, lon: -70, sd: 3, w: 2 }, { lat: 25, lon: -90, sd: 3, w: 1.5 }, { lat: 14, lon: -45, sd: 4, w: 1 }],
+      11: [{ lat: 14, lon: -78, sd: 3, w: 3 }, { lat: 15, lon: -65, sd: 3, w: 2 }, { lat: 27, lon: -62, sd: 4, w: 1.5 }],
+    },
+    epac: {
+      6:  [{ lat: 12, lon: -100, sd: 3, w: 3 }, { lat: 11, lon: -94, sd: 3, w: 2 }, { lat: 13, lon: -108, sd: 3, w: 2 }],
+      7:  [{ lat: 13, lon: -106, sd: 3, w: 3 }, { lat: 12, lon: -98, sd: 3, w: 2 }, { lat: 14, lon: -114, sd: 4, w: 2 }, { lat: 15, lon: -122, sd: 4, w: 1 }],
+      8:  [{ lat: 14, lon: -110, sd: 4, w: 3 }, { lat: 13, lon: -102, sd: 3, w: 2 }, { lat: 15, lon: -120, sd: 4, w: 2 }, { lat: 16, lon: -128, sd: 4, w: 1 }],
+      9:  [{ lat: 14, lon: -112, sd: 4, w: 3 }, { lat: 13, lon: -104, sd: 3, w: 2 }, { lat: 15, lon: -122, sd: 4, w: 2 }, { lat: 12, lon: -97, sd: 3, w: 2 }],
+      10: [{ lat: 13, lon: -106, sd: 3, w: 3 }, { lat: 12, lon: -100, sd: 3, w: 2 }, { lat: 14, lon: -112, sd: 3, w: 2 }],
+      11: [{ lat: 12, lon: -102, sd: 3, w: 3 }, { lat: 11, lon: -98, sd: 3, w: 2 }, { lat: 13, lon: -108, sd: 3, w: 1 }],
+    },
+    wpac: {
+      6:  [{ lat: 13, lon: 135, sd: 4, w: 3 }, { lat: 15, lon: 128, sd: 4, w: 2 }, { lat: 11, lon: 142, sd: 4, w: 2 }, { lat: 16, lon: 150, sd: 4, w: 1 }],
+      7:  [{ lat: 16, lon: 134, sd: 4, w: 3 }, { lat: 18, lon: 128, sd: 4, w: 2 }, { lat: 14, lon: 145, sd: 4, w: 2 }, { lat: 19, lon: 140, sd: 4, w: 2 }, { lat: 13, lon: 155, sd: 4, w: 1 }],
+      8:  [{ lat: 18, lon: 132, sd: 4, w: 3 }, { lat: 20, lon: 128, sd: 4, w: 2 }, { lat: 16, lon: 142, sd: 4, w: 2 }, { lat: 19, lon: 150, sd: 4, w: 2 }, { lat: 15, lon: 158, sd: 4, w: 1 }],
+      9:  [{ lat: 17, lon: 134, sd: 4, w: 3 }, { lat: 19, lon: 130, sd: 4, w: 2 }, { lat: 15, lon: 144, sd: 4, w: 2 }, { lat: 18, lon: 152, sd: 4, w: 2 }, { lat: 14, lon: 160, sd: 4, w: 1 }],
+      10: [{ lat: 15, lon: 135, sd: 4, w: 3 }, { lat: 13, lon: 143, sd: 4, w: 2 }, { lat: 16, lon: 128, sd: 4, w: 2 }, { lat: 12, lon: 152, sd: 4, w: 2 }, { lat: 14, lon: 160, sd: 4, w: 1 }],
+      11: [{ lat: 13, lon: 138, sd: 4, w: 3 }, { lat: 11, lon: 145, sd: 4, w: 2 }, { lat: 14, lon: 132, sd: 4, w: 2 }, { lat: 10, lon: 152, sd: 4, w: 2 }],
+    },
+    nio: {
+      6:  [{ lat: 16, lon: 65, sd: 3, w: 2 }, { lat: 13, lon: 68, sd: 3, w: 2 }, { lat: 17, lon: 88, sd: 3, w: 2 }, { lat: 14, lon: 90, sd: 3, w: 1 }],
+      7:  [{ lat: 19, lon: 88, sd: 3, w: 2 }, { lat: 20, lon: 86, sd: 3, w: 1 }],
+      8:  [{ lat: 20, lon: 88, sd: 3, w: 2 }, { lat: 19, lon: 86, sd: 3, w: 1 }],
+      9:  [{ lat: 18, lon: 89, sd: 3, w: 2 }, { lat: 16, lon: 90, sd: 3, w: 2 }, { lat: 19, lon: 87, sd: 3, w: 1 }],
+      10: [{ lat: 14, lon: 87, sd: 3, w: 3 }, { lat: 15, lon: 90, sd: 3, w: 2 }, { lat: 13, lon: 65, sd: 3, w: 2 }, { lat: 15, lon: 68, sd: 3, w: 1 }],
+      11: [{ lat: 12, lon: 84, sd: 3, w: 3 }, { lat: 13, lon: 88, sd: 3, w: 2 }, { lat: 11, lon: 90, sd: 3, w: 2 }, { lat: 13, lon: 66, sd: 3, w: 1 }],
+    },
   };
   function gauss() { return Math.sqrt(-2 * Math.log(Math.random() + 1e-9)) * Math.cos(2 * Math.PI * Math.random()); }
-  function sampleGenesis(month) {
-    var blobs = MONTH_GENESIS[month] || MONTH_GENESIS[9];
+  function sampleGenesis(basinKey, month) {
+    var byMonth = BASIN_GENESIS[basinKey] || BASIN_GENESIS.atl;
+    var blobs = byMonth[month] || byMonth[9] || byMonth[Object.keys(byMonth)[0]];
     var tot = 0; blobs.forEach(function (b) { tot += b.w; });
     var r = Math.random() * tot, b = blobs[0];
     for (var i = 0; i < blobs.length; i++) { r -= blobs[i].w; if (r <= 0) { b = blobs[i]; break; } }
@@ -162,19 +220,20 @@
 
   function placeSeeds() {
     seeds = [];
-    var month = dealDate.month, tries = 0;
-    // Sample from the month's genesis climatology (over warm ocean, spread out).
-    while (seeds.length < N_SEEDS && tries < 1000) {
+    var basin = BASINS[dealDate.basin], box = basin.box, month = dealDate.month, tries = 0;
+    function inBox(lat, lon) { return lat >= box.latMin && lat <= box.latMax && lon >= box.lonMin && lon <= box.lonMax; }
+    // Sample from the basin/month genesis climatology (over warm ocean, spread out).
+    while (seeds.length < N_SEEDS && tries < 1200) {
       tries++;
-      var p = sampleGenesis(month);
-      if (p.lat < 7 || p.lat > 34 || p.lon < -98 || p.lon > -12) continue;  // keep in basin
+      var p = sampleGenesis(basin.key, month);
+      if (!inBox(p.lat, p.lon)) continue;
       if (!isOcean(p.lat, p.lon) || !farEnough(p.lat, p.lon)) continue;
       seeds.push({ lat: p.lat, lon: p.lon });
     }
-    // Fallback (rare): top up with broad random draws if the climatology was stingy.
-    while (seeds.length < N_SEEDS && tries < 1600) {
+    // Fallback (rare): top up with broad random draws inside the basin box.
+    while (seeds.length < N_SEEDS && tries < 2000) {
       tries++;
-      var lat = rand(9, 26), lon = rand(-90, -22);
+      var lat = rand(box.latMin + 2, box.latMax - 2), lon = rand(box.lonMin + 4, box.lonMax - 4);
       if (isOcean(lat, lon) && farEnough(lat, lon)) seeds.push({ lat: lat, lon: lon });
     }
     renderSeedMarkers();
@@ -193,7 +252,8 @@
   }
 
   function fmtLoc(s) {
-    return Math.abs(s.lat).toFixed(1) + '°N, ' + Math.abs(s.lon).toFixed(1) + '°W';
+    return Math.abs(s.lat).toFixed(1) + '°' + (s.lat < 0 ? 'S' : 'N') + ', ' +
+      Math.abs(s.lon).toFixed(1) + '°' + (s.lon < 0 ? 'W' : 'E');
   }
 
   function renderSeedList() {
@@ -748,9 +808,17 @@
   }
 
   function startGame() {
-    game = { round: 1, total: 0, totalAce: 0, rows: [] };
+    game = { round: 1, total: 0, totalAce: 0, rows: [], mode: selectedMode };
     updateScoreBadge();
     dealRound();
+  }
+
+  // Return to the intro / basin picker and restore the live attract preview.
+  function goHome() {
+    resetRound();
+    $('score-badge').classList.add('hidden');
+    showStage('intro');
+    startAttract();
   }
 
   function nextOrFinish() {
@@ -805,16 +873,23 @@
   function bestStormAce() {
     return game.rows.reduce(function (m, r) { return Math.max(m, r.ace); }, 0);
   }
-  var lbMetric = 'total';                 // which board is showing: 'total' | 'storm'
-  var lbCache = { total: null, storm: null };
-  var lbMine = null;                       // {name, total, storm} for highlighting your row
+  var lbMetric = 'total';                 // 'total' | 'storm'
+  var lbViewMode = 'atl';                  // which basin board is displayed
+  var lbCache = {};                        // mode -> { total:[], storm:[] }
+  var lbMine = null;                       // {name, total, storm, mode} to highlight your row
 
   function lbVal(r, metric) { return metric === 'storm' ? r.best_storm_ace : r.total_ace; }
   function renderLbList() {
-    var ol = $('lb-list'), rows = lbCache[lbMetric];
-    if (!rows || !rows.length) { ol.classList.add('hidden'); ol.innerHTML = ''; return; }
+    var ol = $('lb-list'), board = lbCache[lbViewMode];
+    if (!board) { ol.classList.add('hidden'); ol.innerHTML = ''; return; }   // still loading
+    var rows = board[lbMetric] || [];
+    if (!rows.length) {
+      ol.classList.remove('hidden');
+      ol.innerHTML = '<li class="lb-empty">No scores yet — be the first!</li>';
+      return;
+    }
     ol.innerHTML = rows.map(function (r, i) {
-      var me = lbMine && r.name === lbMine.name &&
+      var me = lbMine && lbMine.mode === lbViewMode && r.name === lbMine.name &&
         Math.abs(Number(lbVal(r, lbMetric)) - lbMine[lbMetric]) < 0.05;
       return '<li class="lb-entry' + (me ? ' me' : '') + '">' +
         '<span class="lb-rank">' + (i + 1) + '</span>' +
@@ -823,9 +898,10 @@
     }).join('');
     ol.classList.remove('hidden');
   }
-  function loadBoards() {
-    return Promise.all([Leaderboard.top('total', 20), Leaderboard.top('storm', 20)])
-      .then(function (res) { lbCache.total = res[0]; lbCache.storm = res[1]; renderLbList(); });
+  function loadBoards(mode) {
+    if (lbCache[mode]) { if (mode === lbViewMode) renderLbList(); return Promise.resolve(); }
+    return Promise.all([Leaderboard.top('total', mode, 20), Leaderboard.top('storm', mode, 20)])
+      .then(function (res) { lbCache[mode] = { total: res[0], storm: res[1] }; if (mode === lbViewMode) renderLbList(); });
   }
   function setLbMetric(metric) {
     lbMetric = metric;
@@ -834,23 +910,30 @@
     });
     renderLbList();
   }
+  function setLbViewMode(mode) {
+    lbViewMode = mode;
+    if ($('lb-basin').value !== mode) $('lb-basin').value = mode;
+    renderLbList();          // show cached (or loading) immediately…
+    loadBoards(mode);        // …then fill in
+  }
   function renderLeaderboard(total, avgPct, isBest, prevBest) {
     // Personal best line (always shown — works with no backend).
     $('leaderboard').innerHTML = isBest
       ? '<svg class="lb-ic"><use href="#ic-trophy"/></svg> New personal best! <b>' + total.toFixed(1) + ' ACE</b>'
       : 'Personal best: <b>' + Math.max(prevBest, total).toFixed(1) + ' ACE</b>';
 
-    var sub = $('lb-submit'), tabs = $('lb-tabs');
+    var sub = $('lb-submit'), controls = $('lb-controls');
     if (!window.Leaderboard || !Leaderboard.configured()) {
-      sub.classList.add('hidden'); tabs.classList.add('hidden'); $('lb-list').classList.add('hidden'); return;
+      sub.classList.add('hidden'); controls.classList.add('hidden'); $('lb-list').classList.add('hidden'); return;
     }
-    lbMine = null; lbCache = { total: null, storm: null };
+    lbMine = null; lbCache = {};
     sub.classList.remove('hidden'); sub.classList.remove('done');
     var msg = $('lb-msg'); msg.textContent = ''; msg.className = 'lb-msg';
     var nm = $('lb-name'); nm.value = ''; nm.disabled = false;
     $('lb-submit-btn').disabled = false;
-    tabs.classList.remove('hidden'); setLbMetric('total');
-    loadBoards();
+    controls.classList.remove('hidden');
+    setLbMetric('total');
+    setLbViewMode(game.mode);   // default to the basin you just played
   }
   function submitScore() {
     if (!window.Leaderboard || !Leaderboard.configured() || $('lb-name').disabled) return;
@@ -859,12 +942,13 @@
     if (err) { msg.textContent = err; msg.className = 'lb-msg err'; return; }
     $('lb-submit-btn').disabled = true;
     msg.textContent = 'Submitting…'; msg.className = 'lb-msg';
-    var avgPct = Math.round(game.total / ROUNDS), storm = bestStormAce();
-    Leaderboard.submit(name, game.totalAce, storm, avgPct).then(function () {
+    var avgPct = Math.round(game.total / ROUNDS), storm = bestStormAce(), mode = game.mode;
+    Leaderboard.submit(name, game.totalAce, storm, avgPct, mode).then(function () {
       msg.textContent = 'Added to the board!'; msg.className = 'lb-msg ok';
       $('lb-submit').classList.add('done'); $('lb-name').disabled = true;
-      lbMine = { name: name.trim(), total: Number(game.totalAce.toFixed(1)), storm: Number(storm.toFixed(1)) };
-      return loadBoards();
+      lbMine = { name: name.trim(), total: Number(game.totalAce.toFixed(1)), storm: Number(storm.toFixed(1)), mode: mode };
+      delete lbCache[mode];          // refetch so your new row appears
+      setLbViewMode(mode);
     }).catch(function (e) {
       msg.textContent = e.message || 'Could not submit.'; msg.className = 'lb-msg err';
       $('lb-submit-btn').disabled = false;
@@ -874,14 +958,24 @@
   // ---- wire up ----
   function init() {
     initMap();
-    $('start-btn').addEventListener('click', startGame);   // intro -> begin 5 rounds
-    $('deal-btn').addEventListener('click', startGame);     // topbar "New game" -> restart
+    $('start-btn').addEventListener('click', startGame);   // intro -> begin the game in the chosen basin
+    $('deal-btn').addEventListener('click', goHome);        // topbar "New game" -> back to basin pick
     $('run-btn').addEventListener('click', runSimulation);  // "Choose this seed"
     $('next-btn').addEventListener('click', nextOrFinish);  // "Next round" / "See final results"
     $('replay-btn').addEventListener('click', replayAnimation);
-    $('again-btn').addEventListener('click', startGame);    // summary -> play again
+    $('again-btn').addEventListener('click', startGame);    // summary -> play again (same basin)
     $('lb-submit-btn').addEventListener('click', submitScore);
     $('lb-name').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); submitScore(); } });
+    // basin mode picker (intro)
+    [].forEach.call(document.querySelectorAll('.mode-opt'), function (b) {
+      b.addEventListener('click', function () {
+        selectedMode = b.getAttribute('data-mode');
+        [].forEach.call(document.querySelectorAll('.mode-opt'), function (o) {
+          o.classList.toggle('is-active', o === b);
+        });
+      });
+    });
+    $('lb-basin').addEventListener('change', function () { setLbViewMode(this.value); });
     [].forEach.call(document.querySelectorAll('.lb-tab'), function (b) {
       b.addEventListener('click', function () { setLbMetric(b.getAttribute('data-metric')); });
     });

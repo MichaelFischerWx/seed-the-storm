@@ -42,7 +42,7 @@
     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
     crossorigin=""
   />
-  <link rel="stylesheet" href="styles.css?v=3" />
+  <link rel="stylesheet" href="styles.css?v=4" />
 </head>
 <body>
   <!-- icon sprite (stroke = currentColor) -->
@@ -90,7 +90,7 @@
       </div>
       <div class="deal-block">
         <div id="deal-info" class="deal-info">
-          <span class="deal-basin"><span class="basin-name">North Atlantic · </span><span id="round-label">Round 1 / 6</span></span>
+          <span class="deal-basin"><span class="basin-name" id="basin-name">North Atlantic · </span><span id="round-label">Round 1 / 6</span></span>
           <span id="deal-date" class="deal-date">—</span>
         </div>
         <div id="score-badge" class="score-badge hidden"><span id="score-badge-val">0.0 ACE</span><span class="info" tabindex="0" data-tip="ACE = Accumulated Cyclone Energy — a storm's total power over its whole life (peak wind² summed every 6 h). A long-lived hurricane outscores a brief intense one."><svg class="info-ic"><use href="#ic-info"/></svg></span></div>
@@ -112,11 +112,10 @@
         <section id="stage-intro" class="stage">
           <h2>How to play</h2>
           <ol class="howto">
-            <li>Each game is <b>6 rounds</b> — one per hurricane-season month,
-              <b>June through November</b> (each from a random year). Watch how
-              the shear relaxes and the storms strengthen toward the Aug–Oct
-              peak, then fade by November. The map shows the <b>real ERA5
-              environment</b> for that month.</li>
+            <li>Pick a <b>basin</b> below, then play <b>6 rounds</b> — one per
+              in-season month (each from a random year). Watch the shear and ocean
+              warmth shift month to month on the <b>real ERA5 environment</b>.
+              <b>Random NH</b> deals a different basin every round.</li>
             <li>Four candidate <b>TC seeds</b> drop onto the map (the colored pins).</li>
             <li>Pick the seed you think will spin up into the storm with the most
               <b>Accumulated Cyclone Energy (ACE)</b> — a measure of a storm's
@@ -128,6 +127,16 @@
           </ol>
           <p class="hint">Warm water + low shear + a long track over open ocean = big ACE.
             Land and shear pull storms apart.</p>
+          <div class="mode-pick">
+            <span class="mode-label">Basin</span>
+            <div id="mode-grid" class="mode-grid" role="group" aria-label="Choose a basin">
+              <button class="mode-opt is-active" data-mode="atl">Atlantic</button>
+              <button class="mode-opt" data-mode="epac">E. Pacific</button>
+              <button class="mode-opt" data-mode="wpac">W. Pacific</button>
+              <button class="mode-opt" data-mode="nio">N. Indian</button>
+              <button class="mode-opt mode-wide" data-mode="nh">🎲 Random NH</button>
+            </div>
+          </div>
           <button id="start-btn" class="btn btn-primary btn-block">Start game</button>
         </section>
 
@@ -185,9 +194,18 @@
             </div>
             <div id="lb-msg" class="lb-msg" aria-live="polite"></div>
           </div>
-          <div id="lb-tabs" class="lb-tabs hidden">
-            <button class="lb-tab is-active" data-metric="total">Total ACE</button>
-            <button class="lb-tab" data-metric="storm">Best storm</button>
+          <div id="lb-controls" class="lb-controls hidden">
+            <select id="lb-basin" class="lb-basin" aria-label="Leaderboard basin">
+              <option value="atl">Atlantic</option>
+              <option value="epac">E. Pacific</option>
+              <option value="wpac">W. Pacific</option>
+              <option value="nio">N. Indian</option>
+              <option value="nh">Random NH</option>
+            </select>
+            <div id="lb-tabs" class="lb-tabs">
+              <button class="lb-tab is-active" data-metric="total">Total ACE</button>
+              <button class="lb-tab" data-metric="storm">Best storm</button>
+            </div>
           </div>
           <ol id="lb-list" class="lb-list hidden"></ol>
           <button id="again-btn" class="btn btn-primary btn-block">Play again</button>
@@ -227,11 +245,11 @@
     };
   </script>
   <!-- ?v=N busts browser/Pages cache on each deploy — bump N when JS/CSS change. -->
-  <script src="js/era5.js?v=3"></script>
-  <script src="js/mpi.js?v=3"></script>
-  <script src="js/model.js?v=3"></script>
-  <script src="js/particles.js?v=3"></script>
-  <script src="js/leaderboard.js?v=3"></script>
-  <script src="js/game.js?v=3"></script>
+  <script src="js/era5.js?v=4"></script>
+  <script src="js/mpi.js?v=4"></script>
+  <script src="js/model.js?v=4"></script>
+  <script src="js/particles.js?v=4"></script>
+  <script src="js/leaderboard.js?v=4"></script>
+  <script src="js/game.js?v=4"></script>
 </body>
 </html>
