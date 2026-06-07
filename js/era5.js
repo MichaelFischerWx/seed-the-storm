@@ -125,6 +125,17 @@
     });
   }
 
+  // Per-storm IBTrACS climatology (percentile anchors per basin × month).
+  // Small plain JSON; cached after first fetch. null if unavailable.
+  var _climo = null;
+  function loadClimo() {
+    if (_climo) return _climo;
+    _climo = fetch(BASE + '/climo.json' + DV)
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .catch(function () { return null; });
+    return _climo;
+  }
+
   // NaN-safe bilinear sample. `values` is one grid frame (ny*nx).
   function bilinear(values, grid, lat, lon) {
     var fi = (lat - grid.lat0) / grid.dlat;   // fractional row
@@ -171,6 +182,7 @@
     loadSST: loadSST,
     loadMPI: loadMPI,
     loadLandMask: loadLandMask,
+    loadClimo: loadClimo,
     fetchDecode: fetchDecode,
     bilinear: bilinear,
     dayFrame: dayFrame,

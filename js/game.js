@@ -49,6 +49,7 @@
   var game = { round: 0, year: 0, total: 0, totalAce: 0, rows: [], mode: 'atl' };
   var animToken = 0;   // invalidates a superseded animation loop
   var sharedMode = false;   // true while viewing a shared storm/game from a link
+  var nextRound = null;     // {basinKey, year, month} prefetched during a reveal → instant next deal
 
   function showStage(name) {
     Object.keys(stages).forEach(function (k) { stages[k].classList.toggle('hidden', k !== name); });
@@ -139,20 +140,34 @@
     });
   }
 
+  // Pre-pick the NEXT round and warm its field fetches (fetchDecode caches by
+  // URL) so that pressing "Next round" deals from cache instead of waiting on
+  // the network. Stored in nextRound for dealRound to consume verbatim.
+  function prefetchNext() {
+    var basin, month;
+    if (game.mode === 'nh') { basin = BASINS[pick(BASIN_KEYS)]; month = pick(basin.months); }
+    else { basin = BASINS[game.mode]; month = basin.months[game.round]; }   // 0-based index of round+1
+    var year = pick(YEARS);
+    nextRound = { basinKey: basin.key, month: month, year: year };
+    loadEnv(basin.key, year, month, 0).catch(function () {});                // fire-and-forget cache warm
+  }
+
   function dealRound() {
     status('Dealing… fetching ERA5 fields');
     resetRound();
     // Pick the basin for this round. Fixed-basin modes step through that basin's
     // 6 months in order; Random-NH mode draws a random basin + month each round.
-    var basin, month;
-    if (game.mode === 'nh') {
-      basin = BASINS[pick(BASIN_KEYS)];
-      month = pick(basin.months);
+    // If the previous reveal already prefetched this round, reuse it verbatim so
+    // its fields are served warm from the fetch cache (no deal lag).
+    var basin, month, year;
+    if (nextRound) {
+      basin = BASINS[nextRound.basinKey]; month = nextRound.month; year = nextRound.year;
+      nextRound = null;
+    } else if (game.mode === 'nh') {
+      basin = BASINS[pick(BASIN_KEYS)]; month = pick(basin.months); year = pick(YEARS);
     } else {
-      basin = BASINS[game.mode];
-      month = basin.months[game.round - 1];
+      basin = BASINS[game.mode]; month = basin.months[game.round - 1]; year = pick(YEARS);
     }
-    var year = pick(YEARS);
     $('round-label').textContent = 'Round ' + game.round + ' / ' + ROUNDS + ' · ' + MONTH_NAMES[month];
     $('basin-name').textContent = basin.name + ' · ';
     track('basin_round', { mode: game.mode, basin: basin.key, month: MONTH_NAMES[month], round: game.round });
@@ -485,12 +500,24 @@
   function drawTrackPolyline(i, upto, faint) {
     var r = results[i], pts = r.track;
     var end = upto == null ? pts.length : upto;
-    for (var k = 1; k < end; k++) {
-      var seg = [[pts[k - 1].lat, pts[k - 1].lon], [pts[k].lat, pts[k].lon]];
-      L.polyline(seg, {
-        color: faint ? '#5b6b8c' : colorForV(pts[k].v),
-        weight: faint ? 1.5 : 3.5, opacity: faint ? 0.5 : 0.95,
-      }).addTo(trackLayer);
+    // Non-chosen tracks: one dashed polyline in the SEED's colour (matches its
+    // pin + result-list dot), bright enough to read but clearly secondary to the
+    // chosen storm's solid, category-coloured line.
+    if (faint) {
+      var ll = [];
+      for (var k = 0; k < end; k++) ll.push([pts[k].lat, pts[k].lon]);
+      if (ll.length > 1) {
+        L.polyline(ll, { color: SEED_COLORS[i], weight: 2.5, opacity: 0.6,
+          dashArray: '3 5', interactive: false }).addTo(trackLayer);
+        var ep = pts[end - 1];
+        L.circleMarker([ep.lat, ep.lon], { radius: 4, color: '#0c2420', weight: 1.5,
+          fillColor: SEED_COLORS[i], fillOpacity: 0.85, interactive: false }).addTo(trackLayer);
+      }
+      return;
+    }
+    for (var s = 1; s < end; s++) {
+      var seg = [[pts[s - 1].lat, pts[s - 1].lon], [pts[s].lat, pts[s].lon]];
+      L.polyline(seg, { color: colorForV(pts[s].v), weight: 3.5, opacity: 0.95 }).addTo(trackLayer);
     }
   }
 
@@ -581,7 +608,10 @@
       : 'Your seed ' + SEED_LABELS[chosenIdx] + ' made <b>' + chosen.ace.toFixed(1) + ' ACE</b> — ' + pct +
         '% of the best (seed ' + SEED_LABELS[bi] + ', ' + best.ace.toFixed(1) + ') → <b>+' + pct + ' pts</b>.';
 
+    renderClimoLine(chosen);
+
     $('next-btn').textContent = game.round < ROUNDS ? 'Next round →' : 'See final results';
+    if (game.round < ROUNDS) prefetchNext();   // warm the next round's fields while the player reads
 
     var ul = $('result-list'); ul.innerHTML = '';
     results.map(function (r, i) { return { r: r, i: i }; })
@@ -641,9 +671,20 @@
       return '<b>Seed ' + SEED_LABELS[ci] + '</b> ' + describe(chosen) +
         ', and no other seed found a better environment. ' + recipe;
     }
-    return '<b>Your seed ' + SEED_LABELS[ci] + '</b> ' + describe(chosen) +
-      '. Meanwhile <b>seed ' + SEED_LABELS[bi] + '</b> ' + describe(best) +
-      ' — that’s where the environment was kindest.';
+    var head = '<b>Your seed ' + SEED_LABELS[ci] + '</b> ' + describe(chosen) + '. ';
+    // ACE rewards a storm's WHOLE LIFE, not its peak — so a strong storm that
+    // makes landfall (or peaks early and fades) can score less than a weaker,
+    // longer-lived one. When that's what happened, teach it directly rather
+    // than claiming the weaker winner had the "kindest" environment (it didn't).
+    if (game.objective === 'ace' && chosen.peakV > best.peakV + 5) {
+      return head + 'But ACE rewards a storm’s whole life, not its peak — the weaker ' +
+        '<b>seed ' + SEED_LABELS[bi] + '</b> lasted longer and banked more energy over time.';
+    }
+    // Otherwise the winner genuinely did better; only call the environment
+    // "kindest" when it actually reached major-hurricane strength.
+    var tail = best.peakV >= 96 ? ' — that’s where the environment was kindest.'
+                                : ' — enough to edge out your pick.';
+    return head + 'Meanwhile <b>seed ' + SEED_LABELS[bi] + '</b> ' + describe(best) + tail;
   }
 
   // ---- post-reveal head-to-head ----
@@ -724,6 +765,47 @@
         row('First landfall', landfallStr(dYour.landfallHr), landfallStr(dOther.landfallHr)) +
       '</tbody></table>' +
       '<p class="cmp-note">Averages over each storm’s full life cycle.</p>';
+    el.classList.remove('hidden');
+  }
+
+  // ---- climatological context (real IBTrACS per-storm percentiles) ----
+  // Where does this storm's ACE (or peak intensity) fall among REAL storms that
+  // formed in the same basin & month, 1991–2020? Anchors are an inverse-CDF
+  // (value at each 5th percentile); we invert it to turn a value into a
+  // percentile. Computed with the SAME ACE definition the game uses, so it's a
+  // fair comparison (see migrate/build_climo_percentiles.py).
+  var climo = null;
+  function ordinal(n) { var s = ['th', 'st', 'nd', 'rd'], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); }
+  function pctOf(x, anchors, pcts) {
+    if (!anchors || !anchors.length) return null;
+    if (x <= anchors[0]) return pcts[0];
+    for (var k = 1; k < anchors.length; k++) {
+      if (x <= anchors[k]) {
+        var lo = anchors[k - 1], hi = anchors[k];
+        if (hi <= lo) return pcts[k];                 // flat CDF region → snap up
+        return pcts[k - 1] + (pcts[k] - pcts[k - 1]) * (x - lo) / (hi - lo);
+      }
+    }
+    return pcts[pcts.length - 1];
+  }
+  function renderClimoLine(r) {
+    var el = $('climo-line'); if (!el) return;
+    function hide() { el.classList.add('hidden'); el.innerHTML = ''; }
+    if (!climo || !climo.basins || !dealDate || !r) return hide();
+    if (r.peakV < 34) return hide();                   // never a tropical storm — nothing to rank
+    var bm = (climo.basins[dealDate.basin] || {})[String(dealDate.month)];
+    if (!bm) return hide();                            // sparse/absent basin-month (e.g. N. Indian midsummer)
+    var vmax = game.objective === 'vmax';
+    var val = vmax ? r.peakV : r.ace;
+    var pct = pctOf(val, vmax ? bm.lmi : bm.ace, climo.pcts);
+    if (pct == null) return hide();
+    var pr = Math.max(1, Math.min(99, Math.round(pct)));
+    var label = MONTH_NAMES[dealDate.month] + ' ' + (MODE_LABEL[dealDate.basin] || '');
+    var yrs = climo.years ? '’' + String(climo.years[0]).slice(2) + '–’' + String(climo.years[1]).slice(2) : '';
+    var what = vmax ? (Math.round(val) + '-kt peak') : (val.toFixed(1) + ' ACE');
+    el.innerHTML = '<svg class="cl-ic"><use href="#ic-trophy"/></svg> That <b>' + what +
+      '</b> ranks around the <b>' + ordinal(pr) + ' percentile</b> of real ' + label +
+      ' storms <span class="muted">(' + yrs + ')</span>.';
     el.classList.remove('hidden');
   }
 
@@ -944,6 +1026,7 @@
   }
 
   function startGame() {
+    nextRound = null;   // no stale prefetch from a previous game/basin
     game = { round: 1, total: 0, totalAce: 0, rows: [], mode: selectedMode, objective: selectedObjective };
     track('game_start', { mode: selectedMode, objective: selectedObjective });
     updateScoreBadge();
@@ -953,6 +1036,7 @@
   // Return to the intro / basin picker and restore the live attract preview.
   function goHome() {
     sharedMode = false;
+    nextRound = null;
     restoreSharedUI();
     resetRound();
     $('score-badge').classList.add('hidden');
@@ -1250,6 +1334,7 @@
     var sp = document.createElement('span'); sp.textContent = 'Someone seeded this storm — watch it grow.'; v.appendChild(sp);
     $('score-line').innerHTML = 'Peaked at <b>' + Math.round(r.peakV) + ' kt</b> (' +
       catLabel(r.peakCat) + ') &nbsp;·&nbsp; <b>' + r.ace.toFixed(1) + ' ACE</b>';
+    renderClimoLine(r);
     $('result-list').innerHTML = '';
     var cmp = $('compare'); if (cmp) { cmp.classList.add('hidden'); cmp.innerHTML = ''; }   // no head-to-head for a lone storm
     $('teach').innerHTML = 'This storm ' + describe(r) + '.';
@@ -1302,6 +1387,7 @@
   // ---- wire up ----
   function init() {
     initMap();
+    ERA5.loadClimo().then(function (c) { climo = c; });   // small JSON; powers the percentile line
     $('start-btn').addEventListener('click', startGame);   // intro -> begin the game in the chosen basin
     $('deal-btn').addEventListener('click', goHome);        // topbar "New game" -> back to basin pick
     $('run-btn').addEventListener('click', runSimulation);  // "Choose this seed"
