@@ -42,7 +42,7 @@
     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
     crossorigin=""
   />
-  <link rel="stylesheet" href="styles.css?v=12" />
+  <link rel="stylesheet" href="styles.css?v=13" />
 </head>
 <body>
   <!-- icon sprite (stroke = currentColor) -->
@@ -77,6 +77,9 @@
     <symbol id="ic-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
     </symbol>
+    <symbol id="ic-share" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+    </symbol>
   </svg>
 
   <div id="app">
@@ -110,6 +113,9 @@
       <aside id="panel">
         <!-- Stage: intro -->
         <section id="stage-intro" class="stage">
+          <p class="intro-mission">Understanding what makes a hurricane strong is how we
+            forecast and prepare for them. <b>Seed the Storm</b> turns that science into a game:
+            read the real atmosphere and pick the seed that will intensify the most.</p>
           <h2>How to play</h2>
           <ol class="howto">
             <li>Pick a <b>basin</b> below, then play <b>6 rounds</b> — one per
@@ -183,6 +189,7 @@
           <p id="teach" class="teach"></p>
           <div class="result-actions">
             <button id="replay-btn" class="btn"><svg class="btn-ic" aria-hidden="true"><use href="#ic-replay"/></svg>Replay</button>
+            <button id="share-storm-btn" class="btn"><svg class="btn-ic" aria-hidden="true"><use href="#ic-share"/></svg>Share</button>
             <button id="next-btn" class="btn btn-primary">Next round →</button>
           </div>
         </section>
@@ -218,10 +225,13 @@
             </div>
           </div>
           <ol id="lb-list" class="lb-list hidden"></ol>
+          <button id="share-game-btn" class="btn btn-block"><svg class="btn-ic" aria-hidden="true"><use href="#ic-share"/></svg>Share my results</button>
           <button id="again-btn" class="btn btn-primary btn-block">Play again</button>
         </section>
 
         <div id="status" class="status"></div>
+        <p class="disclaimer">Hypothetical storms in real historical environments —
+          <b>not real hurricanes</b>. Hurricanes are serious natural hazards.</p>
       </aside>
     </main>
   </div>
@@ -236,6 +246,9 @@
       <canvas id="chart-modal-canvas"></canvas>
     </div>
   </div>
+
+  <!-- transient "link copied" confirmation -->
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
   <script
     src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
@@ -255,11 +268,11 @@
     };
   </script>
   <!-- ?v=N busts browser/Pages cache on each deploy — bump N when JS/CSS change. -->
-  <script src="js/era5.js?v=12"></script>
-  <script src="js/mpi.js?v=12"></script>
-  <script src="js/model.js?v=12"></script>
-  <script src="js/particles.js?v=12"></script>
-  <script src="js/leaderboard.js?v=12"></script>
-  <script src="js/game.js?v=12"></script>
+  <script src="js/era5.js?v=13"></script>
+  <script src="js/mpi.js?v=13"></script>
+  <script src="js/model.js?v=13"></script>
+  <script src="js/particles.js?v=13"></script>
+  <script src="js/leaderboard.js?v=13"></script>
+  <script src="js/game.js?v=13"></script>
 </body>
 </html>

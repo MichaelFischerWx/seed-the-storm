@@ -48,6 +48,7 @@
   var ROUNDS = 6;
   var game = { round: 0, year: 0, total: 0, totalAce: 0, rows: [], mode: 'atl' };
   var animToken = 0;   // invalidates a superseded animation loop
+  var sharedMode = false;   // true while viewing a shared storm/game from a link
 
   function showStage(name) {
     Object.keys(stages).forEach(function (k) { stages[k].classList.toggle('hidden', k !== name); });
@@ -118,6 +119,26 @@
     if (typeof window.gtag === 'function') window.gtag('event', event, params || {});
   }
 
+  // Load the full environment bundle for a (basin, year, month) and frame the
+  // start day. Steering is precomputed (steeru/steerv = 0.75*V850 + 0.25*V200).
+  // Loads this month + the next so a storm can integrate across the month
+  // boundary until it dissipates, on a contiguous time axis. Shared by the
+  // round dealer and the shared-storm replay link.
+  function loadEnv(basinKey, year, month, startDayIdx) {
+    var basin = BASINS[basinKey] || BASINS.atl;
+    return Promise.all([
+      ERA5.loadDailyFieldSpan('steeru', year, month, 2),
+      ERA5.loadDailyFieldSpan('steerv', year, month, 2),
+      ERA5.loadDailyFieldSpan('shear', year, month, 2),
+      ERA5.loadSST(month),
+      ERA5.loadLandMask(),
+      ERA5.loadMPI(year, month),
+    ]).then(function (f) {
+      return { steeru: f[0], steerv: f[1], shear: f[2], sst: f[3], landmask: f[4],
+               mpi: f[5], startDayIdx: startDayIdx, excludeEPac: !!basin.excludeEPac };
+    });
+  }
+
   function dealRound() {
     status('Dealing… fetching ERA5 fields');
     resetRound();
@@ -146,17 +167,8 @@
 
       // Load this month + the next so a storm can be integrated across the
       // month boundary until it dissipates, on a contiguous time axis.
-      // Steering is precomputed (steeru/steerv = 0.75*V850 + 0.25*V200).
-      return Promise.all([
-        ERA5.loadDailyFieldSpan('steeru', year, month, 2),
-        ERA5.loadDailyFieldSpan('steerv', year, month, 2),
-        ERA5.loadDailyFieldSpan('shear', year, month, 2),
-        ERA5.loadSST(month),
-        ERA5.loadLandMask(),
-        ERA5.loadMPI(year, month),
-      ]).then(function (f) {
-        env = { steeru: f[0], steerv: f[1], shear: f[2],
-                sst: f[3], landmask: f[4], mpi: f[5], startDayIdx: startDayIdx, excludeEPac: !!basin.excludeEPac };
+      return loadEnv(basin.key, year, month, startDayIdx).then(function (e) {
+        env = e;
         placeSeeds();
         renderFlow();
         renderShear();
@@ -608,7 +620,7 @@
     if (r.maxShear > 18 && r.peakV < 85) return 'ran into hostile shear (~' +
       Math.round(r.maxShear) + ' m/s) and never matured';
     if (r.recurved) return 'reached ' + peak + ', recurving into the open North Atlantic';
-    if (r.peakV >= 96) return 'sat over warm, low-shear water and roared to ' + peak;
+    if (r.peakV >= 96) return 'sat over warm, low-shear water and intensified into ' + peak;
     if (r.peakV >= 64) return 'became ' + peak;
     return 'held on as ' + peak;
   }
@@ -858,13 +870,25 @@
 
   // Return to the intro / basin picker and restore the live attract preview.
   function goHome() {
+    sharedMode = false;
+    restoreSharedUI();
     resetRound();
     $('score-badge').classList.add('hidden');
     showStage('intro');
     startAttract();
   }
 
+  // Undo any DOM tweaks made by the shared-view renderers so normal play looks right.
+  function restoreSharedUI() {
+    $('share-storm-btn').classList.remove('hidden');
+    $('share-game-btn').classList.remove('hidden');
+    $('next-btn').textContent = 'Next round →';
+    $('again-btn').textContent = 'Play again';
+    var h2 = stages.summary.querySelector('h2'); if (h2) h2.textContent = 'Final results';
+  }
+
   function nextOrFinish() {
+    if (sharedMode) { goHome(); return; }           // shared storm → "Play Seed the Storm"
     if (game.round < ROUNDS) { game.round += 1; dealRound(); }
     else showSummary();
   }
@@ -882,6 +906,8 @@
 
   function showSummary() {
     animToken++;
+    restoreSharedUI();                                  // undo any shared-view DOM tweaks
+    $('leaderboard').classList.remove('hidden');
     var vmax = game.objective === 'vmax';
     var headline = vmax ? bestPeakKt() : game.totalAce;     // peak kt or summed ACE
     var BEST_KEY = vmax ? 'seedstorm_best_peak' : 'seedstorm_best_ace';
@@ -1038,6 +1064,158 @@
     });
   }
 
+  // ---- share (expose the game via a URL) ----
+  // Two flavors, both encoded into a URL hash (#share=<base64url JSON>):
+  //   t:'s' — one storm: (basin, year, month, day, seed lat/lon). Opening the
+  //           link re-runs that EXACT deterministic storm (the model has no RNG)
+  //           and animates it, then invites the viewer to play.
+  //   t:'g' — a finished game: a read-only recap card (per-round breakdown).
+  // No backend, no per-result image — link preview falls back to the generic OG card.
+  function b64uEnc(obj) {
+    var s = btoa(unescape(encodeURIComponent(JSON.stringify(obj))));
+    return s.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  function b64uDec(str) {
+    var s = str.replace(/-/g, '+').replace(/_/g, '/');
+    while (s.length % 4) s += '=';
+    return JSON.parse(decodeURIComponent(escape(atob(s))));
+  }
+  function shareLink(payload) { return location.origin + location.pathname + '#share=' + b64uEnc(payload); }
+
+  function showToast(msg) {
+    var t = $('toast'); if (!t) return;
+    t.textContent = msg; t.classList.remove('hidden');
+    requestAnimationFrame(function () { t.classList.add('show'); });
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(function () {
+      t.classList.remove('show');
+      setTimeout(function () { t.classList.add('hidden'); }, 320);
+    }, 2400);
+  }
+  function fallbackCopy(url) {
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = url; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+      showToast('Link copied — paste it anywhere');
+    } catch (e) { window.prompt('Copy this link:', url); }
+  }
+  function doShare(title, text, url) {
+    if (navigator.share) { navigator.share({ title: title, text: text, url: url }).catch(function () {}); return; }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(function () { showToast('Link copied — paste it anywhere'); }, function () { fallbackCopy(url); });
+    } else fallbackCopy(url);
+  }
+
+  function shareStorm() {
+    if (!results || chosenIdx < 0 || !dealDate || !seeds[chosenIdx]) return;
+    var r = results[chosenIdx], s = seeds[chosenIdx];
+    var payload = { t: 's', b: dealDate.basin, y: dealDate.year, m: dealDate.month, d: dealDate.day,
+                    la: Number(s.lat.toFixed(2)), lo: Number(s.lon.toFixed(2)) };
+    var txt = 'I read the storm environment and spun up a ' + Math.round(r.peakV) + '-kt ' +
+      catLabel(r.peakCat) + ' (' + r.ace.toFixed(1) + ' ACE) in Seed the Storm — can you forecast a stronger one?';
+    track('share', { kind: 'storm', basin: dealDate.basin, peak_kt: Math.round(r.peakV) });
+    doShare('Seed the Storm', txt, shareLink(payload));
+  }
+  function shareGame() {
+    var vmax = game.objective === 'vmax';
+    var rows = game.rows.map(function (r) {
+      return { r: r.round, d: r.date, l: r.label, c: r.cat, a: Number(r.ace.toFixed(1)), v: Math.round(r.peakV), p: r.points };
+    });
+    var payload = { t: 'g', mode: game.mode, obj: game.objective,
+                    total: Number(game.totalAce.toFixed(1)), peak: Math.round(bestPeakKt()),
+                    avg: Math.round(game.total / ROUNDS), rows: rows };
+    var head = vmax ? (Math.round(bestPeakKt()) + '-kt peak') : (game.totalAce.toFixed(1) + ' ACE');
+    var txt = 'I scored ' + head + ' reading the storm environment in ' +
+      (MODE_LABEL[game.mode] || 'Seed the Storm') + ' — can you beat my forecast?';
+    track('share', { kind: 'game', mode: game.mode });
+    doShare('Seed the Storm', txt, shareLink(payload));
+  }
+
+  // Re-run a single shared storm deterministically and animate it.
+  function showSharedStorm(p) {
+    var basin = BASINS[p.b] || BASINS.atl;
+    sharedMode = true;
+    game = { round: 0, total: 0, totalAce: 0, rows: [], mode: basin.key, objective: 'ace' };
+    $('basin-name').textContent = basin.name + ' · ';
+    $('round-label').textContent = 'Shared storm';
+    $('score-badge').classList.add('hidden');
+    showStage('result');
+    status('Loading shared storm…');
+    dealDate = { year: p.y, month: p.m, day: p.d, basin: basin.key };
+    elDealDate.textContent = MONTH_NAMES[p.m] + ' ' + p.d + ', ' + p.y;
+    if (basin.view) map.setView(basin.view.center, basin.view.zoom, { animate: false });
+    loadEnv(basin.key, p.y, p.m, p.d - 1).then(function (e) {
+      env = e;
+      seeds = [{ lat: p.la, lon: p.lo }];
+      chosenIdx = 0;
+      results = Model.runSeeds(env, seeds);
+      renderFlow(); renderShear(); renderMpi();
+      status('');
+      revealShared(results[0]);
+      animateTrack(0);
+    }).catch(function (err) {
+      console.error(err);
+      status('Could not load the shared storm — starting a fresh game.', true);
+      sharedMode = false; setTimeout(goHome, 1400);
+    });
+  }
+  // A focused, score-free reveal for a shared storm (no "best seed" comparison).
+  function revealShared(r) {
+    var v = $('verdict');
+    v.className = 'verdict win';
+    v.innerHTML = '<svg class="v-ic"><use href="#ic-cyclone"/></svg>';
+    var sp = document.createElement('span'); sp.textContent = 'Someone seeded this storm — watch it grow.'; v.appendChild(sp);
+    $('score-line').innerHTML = 'Peaked at <b>' + Math.round(r.peakV) + ' kt</b> (' +
+      catLabel(r.peakCat) + ') &nbsp;·&nbsp; <b>' + r.ace.toFixed(1) + ' ACE</b>';
+    $('result-list').innerHTML = '';
+    $('teach').innerHTML = 'This storm ' + describe(r) + '.';
+    $('share-storm-btn').classList.add('hidden');     // (re-sharing handled from a fresh game)
+    $('next-btn').textContent = 'Play Seed the Storm →';
+    drawIntensityChart();
+  }
+
+  // Render a shared game as a read-only recap, reusing the summary stage.
+  function showSharedGame(p) {
+    sharedMode = true;
+    game = { round: 0, total: 0, totalAce: p.total || 0, rows: [], mode: p.mode || 'atl', objective: p.obj || 'ace' };
+    var vmax = p.obj === 'vmax';
+    $('score-badge').classList.add('hidden');
+    var h2 = stages.summary.querySelector('h2'); if (h2) h2.textContent = 'A shared game';
+    $('summary-total').innerHTML = (vmax
+      ? 'They peaked at <b>' + p.peak + ' kt</b>'
+      : 'They scored <b>' + Number(p.total).toFixed(1) + ' ACE</b>') +
+      ' &nbsp;·&nbsp; <span class="muted">' + escapeHtml(MODE_LABEL[p.mode] || '') +
+      ' · picked ' + p.avg + '% of the best on average</span>';
+    var ul = $('summary-list'); ul.innerHTML = '';
+    (p.rows || []).forEach(function (r) {
+      var c = String(r.c), li = document.createElement('li');
+      li.className = 'summary-row';
+      li.innerHTML = '<span><b>R' + r.r + '</b> · ' + escapeHtml(String(r.d)) + '</span>' +
+        '<span class="result-tag">seed ' + escapeHtml(String(r.l)) + ' · ' +
+        (c.length === 1 ? 'Cat ' : '') + escapeHtml(c) + ' · ' + r.p + '% of best</span>' +
+        '<span class="sr-pts">' + (vmax ? r.v + ' kt' : Number(r.a).toFixed(1) + ' ACE') + '</span>';
+      ul.appendChild(li);
+    });
+    ['leaderboard', 'lb-rank', 'lb-submit', 'lb-controls', 'lb-list'].forEach(function (id) { $(id).classList.add('hidden'); });
+    $('share-game-btn').classList.add('hidden');
+    $('again-btn').textContent = 'Play your own →';
+    showStage('summary');
+  }
+
+  // Parse a #share= link on load. Returns true if a shared view was launched.
+  function readShare() {
+    var m = (location.hash || '').match(/share=([^&]+)/);
+    if (!m) return false;
+    var p; try { p = b64uDec(m[1]); } catch (e) { return false; }
+    if (!p || (p.t !== 's' && p.t !== 'g')) return false;
+    // Drop the hash so Replay / New game don't re-trigger the shared view.
+    try { history.replaceState(null, '', location.pathname + location.search); }
+    catch (e) { location.hash = ''; }
+    if (p.t === 's') showSharedStorm(p); else showSharedGame(p);
+    return true;
+  }
+
   // ---- wire up ----
   function init() {
     initMap();
@@ -1046,7 +1224,10 @@
     $('run-btn').addEventListener('click', runSimulation);  // "Choose this seed"
     $('next-btn').addEventListener('click', nextOrFinish);  // "Next round" / "See final results"
     $('replay-btn').addEventListener('click', replayAnimation);
-    $('again-btn').addEventListener('click', startGame);    // summary -> play again (same basin)
+    $('share-storm-btn').addEventListener('click', shareStorm);   // result -> share this one storm
+    $('share-game-btn').addEventListener('click', shareGame);     // summary -> share the whole game
+    // "Play again" (or "Play your own →" after a shared-game card).
+    $('again-btn').addEventListener('click', function () { if (sharedMode) goHome(); else startGame(); });
     $('lb-submit-btn').addEventListener('click', submitScore);
     $('lb-name').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); submitScore(); } });
     // basin mode picker (intro)
@@ -1085,8 +1266,9 @@
       if (map) map.invalidateSize({ animate: false });   // keep the map filling its box on rotate/resize
       if (results && chosenIdx >= 0) drawIntensityChart();
     });
-    showStage('intro');
-    startAttract();   // live sample environment behind the "How to play" intro
+    // A #share= link opens straight into the shared storm/game; otherwise the
+    // normal intro with the live sample-environment preview behind it.
+    if (!readShare()) { showStage('intro'); startAttract(); }
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
