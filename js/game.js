@@ -111,6 +111,12 @@
   function rand(a, b) { return a + Math.random() * (b - a); }
   function pick(arr) { return arr[(Math.random() * arr.length) | 0]; }
 
+  // Google Analytics (GA4) custom event — no-ops when gtag isn't loaded (e.g.
+  // local previews, or before the snippet runs). Lets us see basin engagement.
+  function track(event, params) {
+    if (typeof window.gtag === 'function') window.gtag('event', event, params || {});
+  }
+
   function dealRound() {
     status('Dealing… fetching ERA5 fields');
     resetRound();
@@ -127,6 +133,7 @@
     var year = pick(YEARS);
     $('round-label').textContent = 'Round ' + game.round + ' / ' + ROUNDS + ' · ' + MONTH_NAMES[month];
     $('basin-name').textContent = basin.name + ' · ';
+    track('basin_round', { mode: game.mode, basin: basin.key, month: MONTH_NAMES[month], round: game.round });
 
     ERA5.loadManifest().then(function (man) {
       var nDays = man.daily['shear/' + year + '_' + (month < 10 ? '0' : '') + month].nDays;
@@ -809,6 +816,7 @@
 
   function startGame() {
     game = { round: 1, total: 0, totalAce: 0, rows: [], mode: selectedMode };
+    track('game_start', { mode: selectedMode });
     updateScoreBadge();
     dealRound();
   }
@@ -844,6 +852,7 @@
     var isBest = game.totalAce > prevBest;
     if (isBest) window.localStorage.setItem(BEST_KEY, game.totalAce.toFixed(1));
     var avgPct = Math.round(game.total / ROUNDS);
+    track('game_complete', { mode: game.mode, total_ace: Number(game.totalAce.toFixed(1)), best_storm_ace: Number(bestStormAce().toFixed(1)), avg_pct: avgPct });
 
     $('summary-total').innerHTML = 'You scored <b>' + game.totalAce.toFixed(1) + ' ACE</b>' +
       ' &nbsp;·&nbsp; <span class="muted">picked ' + avgPct + '% of the best on average</span>';
@@ -946,6 +955,7 @@
     Leaderboard.submit(name, game.totalAce, storm, avgPct, mode).then(function () {
       msg.textContent = 'Added to the board!'; msg.className = 'lb-msg ok';
       $('lb-submit').classList.add('done'); $('lb-name').disabled = true;
+      track('score_submit', { mode: mode, total_ace: Number(game.totalAce.toFixed(1)), best_storm_ace: Number(storm.toFixed(1)) });
       lbMine = { name: name.trim(), total: Number(game.totalAce.toFixed(1)), storm: Number(storm.toFixed(1)), mode: mode };
       delete lbCache[mode];          // refetch so your new row appears
       setLbViewMode(mode);
