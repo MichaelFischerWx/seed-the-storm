@@ -42,7 +42,7 @@
     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
     crossorigin=""
   />
-  <link rel="stylesheet" href="styles.css?v=6" />
+  <link rel="stylesheet" href="styles.css?v=10" />
 </head>
 <body>
   <!-- icon sprite (stroke = currentColor) -->
@@ -137,6 +137,13 @@
               <button class="mode-opt mode-wide" data-mode="nh">🎲 Random NH</button>
             </div>
           </div>
+          <div class="mode-pick">
+            <span class="mode-label">Goal — maximize</span>
+            <div id="obj-grid" class="obj-grid" role="group" aria-label="Choose what to maximize">
+              <button class="obj-opt is-active" data-obj="ace">Total ACE</button>
+              <button class="obj-opt" data-obj="vmax">Peak intensity</button>
+            </div>
+          </div>
           <button id="start-btn" class="btn btn-primary btn-block">Start game</button>
         </section>
 
@@ -165,6 +172,7 @@
           <div id="score-line" class="score-line"></div>
           <div class="chart-wrap">
             <canvas id="intensity-chart" width="320" height="160"></canvas>
+            <div id="chart-cursor" class="chart-cursor hidden"></div>
             <button id="chart-expand" class="icon-btn chart-expand" title="Expand chart"><svg class="btn-ic" aria-hidden="true"><use href="#ic-expand"/></svg></button>
           </div>
           <div class="chart-toggles">
@@ -203,8 +211,9 @@
               <option value="nh">Random NH</option>
             </select>
             <div id="lb-tabs" class="lb-tabs">
-              <button class="lb-tab is-active" data-metric="total">Total ACE</button>
-              <button class="lb-tab" data-metric="storm">Best storm</button>
+              <button class="lb-tab is-active" data-board="total">Total ACE</button>
+              <button class="lb-tab" data-board="storm">Best storm</button>
+              <button class="lb-tab" data-board="peak">Peak</button>
             </div>
           </div>
           <ol id="lb-list" class="lb-list hidden"></ol>
@@ -245,11 +254,11 @@
     };
   </script>
   <!-- ?v=N busts browser/Pages cache on each deploy — bump N when JS/CSS change. -->
-  <script src="js/era5.js?v=6"></script>
-  <script src="js/mpi.js?v=6"></script>
-  <script src="js/model.js?v=6"></script>
-  <script src="js/particles.js?v=6"></script>
-  <script src="js/leaderboard.js?v=6"></script>
-  <script src="js/game.js?v=6"></script>
+  <script src="js/era5.js?v=10"></script>
+  <script src="js/mpi.js?v=10"></script>
+  <script src="js/model.js?v=10"></script>
+  <script src="js/particles.js?v=10"></script>
+  <script src="js/leaderboard.js?v=10"></script>
+  <script src="js/game.js?v=10"></script>
 </body>
 </html>

@@ -38,8 +38,8 @@
   // "~58%"); the favorable corner (S~5) reaches ~82% -> Cat 3-4. The shear-only
   // line implicitly carries the dropped convective-instability (C) term.
   var KMAX = 1.0;              // day^-1, growth rate at zero shear (= beta)
-  var SHEAR_ZERO = 15;         // m/s, shear at which kappa = 0 (favorable-C slice
-                               // of Fig. 8; storms intensify through moderate shear)
+  var SHEAR_ZERO = 15;         // m/s, shear at which kappa = 0 — storms intensify
+                               // through moderate shear and begin to decay by ~12–15 m/s.
   var KS = KMAX / SHEAR_ZERO;  // day^-1 per m/s (kappa slope vs shear)
   var KAPPA_MIN = -1.0;        // day^-1 floor in extreme shear
   var ALPHA_LAND = 0.10;       // h^-1 inland-decay rate (low-latitude)
@@ -133,10 +133,18 @@
       var shear = ERA5.sampleTime(env.shear, dayFloat, lat, lon);
       if (!isFinite(shear)) shear = 0;
       var pi = MPI.atPoint(env.sst, lat, lon);
+      // Land fraction from the high-res (0.1°) mask if present; else fall back to
+      // the coarse 1° SST land flag. Resolves small islands the 1° SST misses.
+      var lf = 0;
+      if (env.landmask) {
+        lf = ERA5.bilinear(env.landmask.values, env.landmask.grid, lat, lon);
+        lf = isFinite(lf) ? Math.max(0, Math.min(1, lf)) : 0;
+      } else if (pi.land) { lf = 1; }
+      var onLand = lf >= 0.5;
       maxShear = Math.max(maxShear, shear);
 
       track.push({ hr: hr, lat: lat, lon: lon, v: v, cat: catOf(v),
-                   shear: shear, mpi: pi.mpi, sstC: pi.sstC, land: pi.land });
+                   shear: shear, mpi: pi.mpi, landFrac: lf, sstC: pi.sstC, land: onLand });
 
       if (v >= ACE_MIN) everStorm = true;
       if (everStorm && hr % 6 === 0) ace += v * v;   // 6-hourly ACE
@@ -144,20 +152,23 @@
       if (lon < minLon) minLon = lon;
       if (lon > minLon + 2 && lat > 25) recurved = true; // turned back east at high lat
 
-      // LGEM intensity update (forward Euler at dt = 1 h, per DeMaria 2009).
-      var dV, onLand = pi.land;
-      if (onLand || pi.mpi < MPI_MIN) {
-        // Over land or cold water: relax toward the background wind.
-        if (onLand) madeLandfall = true;
-        dV = -ALPHA_LAND * (v - V_B);
+      // LGEM intensity update (forward Euler at dt = 1 h, per DeMaria 2009), with
+      // graded land decay: the over-water tendency and the inland-decay tendency
+      // are blended by the land fraction, so islands/coasts weaken storms in
+      // proportion to how much land they're over.
+      if (onLand) madeLandfall = true;
+      var landDV = -ALPHA_LAND * (v - V_B);
+      var waterDV;
+      if (pi.mpi < MPI_MIN) {
+        waterDV = -ALPHA_LAND * (v - V_B);     // cold / no-MPI water also decays
       } else {
-        // Over water: growth (kappa) vs. an MPI-bounding mortality term.
-        // kappa(shear) goes negative in strong shear -> the storm weakens
-        // smoothly rather than collapsing in one step.
+        // kappa(shear) goes negative above SHEAR_ZERO so the storm weakens
+        // smoothly — storms begin to decay around 12–15 m/s of shear.
         var kappa = Math.max(KAPPA_MIN, KMAX - KS * shear) / 24; // h^-1
         var mort = BETA * v * Math.pow(v / pi.mpi, N_EXP);
-        dV = kappa * v - mort;
+        waterDV = kappa * v - mort;
       }
+      var dV = (1 - lf) * waterDV + lf * landDV;
       if (dV > DV_CAP) dV = DV_CAP; else if (dV < -DV_CAP) dV = -DV_CAP;
       var vNext = v + dV * DT_HR;
       // Kaplan-DeMaria coastline reduction on each land<->water crossing.

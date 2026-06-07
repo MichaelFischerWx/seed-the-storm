@@ -26,16 +26,19 @@ create table if not exists public.scores (
   id             bigint generated always as identity primary key,
   name           text not null,
   mode           text not null default 'atl' check (mode in ('atl','epac','wpac','nio','nh')),
+  objective      text not null default 'ace' check (objective in ('ace','vmax')),
   total_ace      numeric(6,1) not null check (total_ace >= 0 and total_ace <= 300),
   best_storm_ace numeric(6,1) not null check (best_storm_ace >= 0 and best_storm_ace <= 100),
+  best_peak_kt   numeric(5,1) not null default 0 check (best_peak_kt >= 0 and best_peak_kt <= 220),
   avg_pct        int check (avg_pct between 0 and 100),
   created_at     timestamptz not null default now()
 );
 
--- Per-basin leaderboards: highest total ACE (whole game) and highest single-storm
--- ACE, each filtered by mode (atl / epac / wpac / nio / nh = Random NH).
-create index if not exists scores_total_idx on public.scores (mode, total_ace desc, created_at asc);
-create index if not exists scores_storm_idx on public.scores (mode, best_storm_ace desc, created_at asc);
+-- Leaderboards are per (basin × objective). ACE objective ranks by total ACE or
+-- best single-storm ACE; VMAX objective ranks by highest single-storm peak wind.
+create index if not exists scores_total_idx on public.scores (mode, objective, total_ace desc, created_at asc);
+create index if not exists scores_storm_idx on public.scores (mode, objective, best_storm_ace desc, created_at asc);
+create index if not exists scores_peak_idx  on public.scores (mode, objective, best_peak_kt desc, created_at asc);
 
 -- Normalize a name for matching: lowercase → de-leetspeak → letters only.
 -- Mirrors norm() in js/leaderboard.js.

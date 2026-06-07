@@ -29,6 +29,7 @@
   var MODE_LABEL = { atl: 'Atlantic', epac: 'E. Pacific', wpac: 'W. Pacific', nio: 'N. Indian', nh: 'Random NH' };
   var MODES = ['atl', 'epac', 'wpac', 'nio', 'nh'];
   var selectedMode = 'atl';
+  var selectedObjective = 'ace';   // 'ace' (max total ACE) | 'vmax' (max peak intensity)
 
   // ---- state ----
   var map, seedLayer, trackLayer, mpiLayer = null, flowLayer = null, shearLayer = null;
@@ -151,9 +152,10 @@
         ERA5.loadDailyFieldSpan('steerv', year, month, 2),
         ERA5.loadDailyFieldSpan('shear', year, month, 2),
         ERA5.loadSST(month),
+        ERA5.loadLandMask(),
       ]).then(function (f) {
         env = { steeru: f[0], steerv: f[1], shear: f[2],
-                sst: f[3], startDayIdx: startDayIdx, excludeEPac: !!basin.excludeEPac };
+                sst: f[3], landmask: f[4], startDayIdx: startDayIdx, excludeEPac: !!basin.excludeEPac };
         placeSeeds();
         renderFlow();
         renderShear();
@@ -456,8 +458,11 @@
     }, 30);
   }
 
+  // The quantity the player is optimizing this game.
+  function objVal(r) { return game.objective === 'vmax' ? r.peakV : r.ace; }
+  function catLabel(cat) { return cat && cat.length === 1 ? 'Cat ' + cat : cat; }
   function bestIdx() {
-    var bi = 0; for (var i = 1; i < results.length; i++) if (results[i].ace > results[bi].ace) bi = i;
+    var bi = 0; for (var i = 1; i < results.length; i++) if (objVal(results[i]) > objVal(results[bi])) bi = i;
     return bi;
   }
 
@@ -489,6 +494,7 @@
     if (flowLayer && map.hasLayer(flowLayer)) flowLayer.setTime(env.startDayIdx);
     if (shearLayer) shearLayer.setUrl(shearUrlAt(env.startDayIdx));
     updateClock(0);
+    setChartCursor(0);
 
     var maxHr = pts[pts.length - 1].hr, simHr = 0, drawn = 1, lastMs = 0, lastShearHr = 0;
     function frame(ts) {
@@ -507,8 +513,9 @@
       head.setStyle({ fillColor: colorForV(p.v), radius: 5 + p.v / 22 });
       head.bindTooltip('Day ' + (p.hr / 24).toFixed(1) + ' · ' + p.cat + ' · ' + Math.round(p.v) + ' kt',
         { className: 'track-tip', permanent: false });
-      // Evolve the steering flow + shaded shear field + clock forward with the storm.
+      // Evolve the steering flow + shaded shear field + clock + chart cursor.
       updateClock(p.hr);
+      setChartCursor(p.hr);
       if (flowLayer && map.hasLayer(flowLayer)) flowLayer.setTime(env.startDayIdx + p.hr / 24);
       if (shearLayer && p.hr - lastShearHr >= SHEAR_REBUILD_HR) {
         lastShearHr = p.hr; shearLayer.setUrl(shearUrlAt(env.startDayIdx + p.hr / 24));
@@ -520,7 +527,9 @@
 
   function revealResults() {
     var bi = bestIdx(), chosen = results[chosenIdx], best = results[bi];
-    var pct = best.ace > 0 ? Math.round(100 * chosen.ace / best.ace) : 100;
+    var vmax = game.objective === 'vmax';
+    var cv = objVal(chosen), bv = objVal(best);
+    var pct = bv > 0 ? Math.round(100 * cv / bv) : 100;
 
     // Record this round's score and update the running total.
     game.rows.push({
@@ -549,15 +558,18 @@
     v.innerHTML = '<svg class="v-ic"><use href="#' + icon + '"/></svg>';
     var vmsg = document.createElement('span'); vmsg.textContent = msg; v.appendChild(vmsg);
 
-    $('score-line').innerHTML = 'Your seed ' + SEED_LABELS[chosenIdx] + ' made <b>' +
-      chosen.ace.toFixed(1) + ' ACE</b> — ' + pct + '% of the best (seed ' + SEED_LABELS[bi] + ', ' +
-      best.ace.toFixed(1) + ') → <b>+' + pct + ' pts</b>.';
+    $('score-line').innerHTML = vmax
+      ? 'Your seed ' + SEED_LABELS[chosenIdx] + ' peaked at <b>' + Math.round(chosen.peakV) + ' kt</b> (' +
+        catLabel(chosen.peakCat) + ') — ' + pct + '% of the best (seed ' + SEED_LABELS[bi] + ', ' +
+        Math.round(best.peakV) + ' kt) → <b>+' + pct + ' pts</b>.'
+      : 'Your seed ' + SEED_LABELS[chosenIdx] + ' made <b>' + chosen.ace.toFixed(1) + ' ACE</b> — ' + pct +
+        '% of the best (seed ' + SEED_LABELS[bi] + ', ' + best.ace.toFixed(1) + ') → <b>+' + pct + ' pts</b>.';
 
     $('next-btn').textContent = game.round < ROUNDS ? 'Next round →' : 'See final results';
 
     var ul = $('result-list'); ul.innerHTML = '';
     results.map(function (r, i) { return { r: r, i: i }; })
-      .sort(function (a, b2) { return b2.r.ace - a.r.ace; })
+      .sort(function (a, b2) { return objVal(b2.r) - objVal(a.r); })   // rank by the objective
       .forEach(function (o) {
         var r = o.r, i = o.i, li = document.createElement('li');
         li.className = 'result-item' + (i === bi ? ' best' : '') + (i === chosenIdx ? ' chosen' : '');
@@ -565,7 +577,7 @@
           '<span><b>Seed ' + SEED_LABELS[i] + '</b> ' +
           '<span class="result-tag">peak ' + (r.peakCat.length === 1 ? 'Cat ' : '') + r.peakCat +
           ' · ' + Math.round(r.peakV) + ' kt</span></span>' +
-          '<span class="result-ace">' + r.ace.toFixed(1) + ' ACE</span>';
+          '<span class="result-ace">' + (vmax ? Math.round(r.peakV) + ' kt' : r.ace.toFixed(1) + ' ACE') + '</span>';
         ul.appendChild(li);
       });
 
@@ -606,9 +618,11 @@
         ' kt. No hurricane in the cards this time; some weeks the basin just won’t cooperate.';
     }
     if (ci === bi) {
+      var recipe = game.objective === 'vmax'
+        ? 'Warm SST + weak shear is the rapid-intensification recipe.'
+        : 'Warm SST + weak shear + a long fetch over open ocean is the ACE recipe.';
       return '<b>Seed ' + SEED_LABELS[ci] + '</b> ' + describe(chosen) +
-        ', and no other seed found a better environment. Warm SST + weak shear + a long ' +
-        'fetch over open ocean is the ACE recipe.';
+        ', and no other seed found a better environment. ' + recipe;
     }
     return '<b>Your seed ' + SEED_LABELS[ci] + '</b> ' + describe(chosen) +
       '. Meanwhile <b>seed ' + SEED_LABELS[bi] + '</b> ' + describe(best) +
@@ -616,6 +630,18 @@
   }
 
   // Redraw the inset chart (and the expanded one if open).
+  // Moving vertical time-cursor over the inset intensity chart during playback.
+  var chartGeom = null;
+  function setChartCursor(hr) {
+    var g = chartGeom, el = $('chart-cursor');
+    if (!g || !el) return;
+    var x = g.padL + (g.w - g.padL - g.padR) * Math.max(0, Math.min(hr, g.maxHr)) / g.maxHr;
+    el.style.left = x + 'px'; el.style.top = g.padT + 'px';
+    el.style.height = (g.h - g.padT - g.padB) + 'px';
+    el.classList.remove('hidden');
+  }
+  function hideChartCursor() { var el = $('chart-cursor'); if (el) el.classList.add('hidden'); }
+
   function drawIntensityChart() {
     renderChart($('intensity-chart'));
     if (!$('chart-modal').classList.contains('hidden')) renderChart($('chart-modal-canvas'));
@@ -638,6 +664,8 @@
     results.forEach(function (r) { maxTrackHr = Math.max(maxTrackHr, r.track[r.track.length - 1].hr); });
     var maxHr = Math.ceil(maxTrackHr / 24) * 24, maxV = 160, maxSh = 40;
     function X(hr) { return padL + (w - padL - padR) * hr / maxHr; }
+    // Remember the inset's geometry so the animation time-cursor can align to it.
+    if (cv === $('intensity-chart')) chartGeom = { padL: padL, padR: padR, padT: padT, padB: padB, w: w, h: h, maxHr: maxHr };
     function Y(v) { return padT + (h - padT - padB) * (1 - v / maxV); }
     function Ysh(kt) { return padT + (h - padT - padB) * (1 - kt / maxSh); }
     ctx.font = fs + "px 'DM Sans', system-ui, sans-serif"; ctx.textBaseline = 'middle';
@@ -809,14 +837,17 @@
   }
 
   // ---- game flow ----
+  function bestPeakKt() { return game.rows.reduce(function (m, r) { return Math.max(m, r.peakV); }, 0); }
   function updateScoreBadge() {
     $('score-badge').classList.remove('hidden');
-    $('score-badge-val').textContent = game.totalAce.toFixed(1) + ' ACE';   // headline score = summed ACE
+    $('score-badge-val').textContent = game.objective === 'vmax'
+      ? Math.round(bestPeakKt()) + ' kt'        // headline = strongest single storm so far
+      : game.totalAce.toFixed(1) + ' ACE';      // headline = summed ACE
   }
 
   function startGame() {
-    game = { round: 1, total: 0, totalAce: 0, rows: [], mode: selectedMode };
-    track('game_start', { mode: selectedMode });
+    game = { round: 1, total: 0, totalAce: 0, rows: [], mode: selectedMode, objective: selectedObjective };
+    track('game_start', { mode: selectedMode, objective: selectedObjective });
     updateScoreBadge();
     dealRound();
   }
@@ -847,15 +878,22 @@
 
   function showSummary() {
     animToken++;
-    var BEST_KEY = 'seedstorm_best_ace';
+    var vmax = game.objective === 'vmax';
+    var headline = vmax ? bestPeakKt() : game.totalAce;     // peak kt or summed ACE
+    var BEST_KEY = vmax ? 'seedstorm_best_peak' : 'seedstorm_best_ace';
     var prevBest = parseFloat(window.localStorage.getItem(BEST_KEY) || '0');
-    var isBest = game.totalAce > prevBest;
-    if (isBest) window.localStorage.setItem(BEST_KEY, game.totalAce.toFixed(1));
+    var isBest = headline > prevBest;
+    if (isBest) window.localStorage.setItem(BEST_KEY, headline.toFixed(1));
     var avgPct = Math.round(game.total / ROUNDS);
-    track('game_complete', { mode: game.mode, total_ace: Number(game.totalAce.toFixed(1)), best_storm_ace: Number(bestStormAce().toFixed(1)), avg_pct: avgPct });
+    track('game_complete', { mode: game.mode, objective: game.objective,
+      total_ace: Number(game.totalAce.toFixed(1)), best_storm_ace: Number(bestStormAce().toFixed(1)),
+      best_peak_kt: Number(bestPeakKt().toFixed(1)), avg_pct: avgPct });
 
-    $('summary-total').innerHTML = 'You scored <b>' + game.totalAce.toFixed(1) + ' ACE</b>' +
-      ' &nbsp;·&nbsp; <span class="muted">picked ' + avgPct + '% of the best on average</span>';
+    $('summary-total').innerHTML = vmax
+      ? 'Your strongest storm: <b>' + Math.round(headline) + ' kt</b> (' + catLabel(Model.catOf(headline)) + ')' +
+        ' &nbsp;·&nbsp; <span class="muted">picked ' + avgPct + '% of the best on average</span>'
+      : 'You scored <b>' + game.totalAce.toFixed(1) + ' ACE</b>' +
+        ' &nbsp;·&nbsp; <span class="muted">picked ' + avgPct + '% of the best on average</span>';
 
     var ul = $('summary-list'); ul.innerHTML = '';
     game.rows.forEach(function (r) {
@@ -864,11 +902,11 @@
       li.innerHTML = '<span><b>R' + r.round + '</b> · ' + r.date + '</span>' +
         '<span class="result-tag">seed ' + r.label + ' · ' +
         (r.cat.length === 1 ? 'Cat ' : '') + r.cat + ' · ' + r.points + '% of best</span>' +
-        '<span class="sr-pts">' + r.ace.toFixed(1) + ' ACE</span>';
+        '<span class="sr-pts">' + (vmax ? Math.round(r.peakV) + ' kt' : r.ace.toFixed(1) + ' ACE') + '</span>';
       ul.appendChild(li);
     });
 
-    renderLeaderboard(game.totalAce, avgPct, isBest, prevBest);
+    renderLeaderboard(headline, avgPct, isBest, prevBest);
     showStage('summary');
   }
 
@@ -882,40 +920,43 @@
   function bestStormAce() {
     return game.rows.reduce(function (m, r) { return Math.max(m, r.ace); }, 0);
   }
-  var lbMetric = 'total';                 // 'total' | 'storm'
+  var lbBoard = 'total';                   // 'total' | 'storm' (ACE games) | 'peak' (Vmax games)
   var lbViewMode = 'atl';                  // which basin board is displayed
-  var lbCache = {};                        // mode -> { total:[], storm:[] }
-  var lbMine = null;                       // {name, total, storm, mode} to highlight your row
+  var lbCache = {};                        // mode -> { total:[], storm:[], peak:[] }
+  var lbMine = null;                       // { name, mode, objective, total, storm, peak }
 
-  function lbVal(r, metric) { return metric === 'storm' ? r.best_storm_ace : r.total_ace; }
+  var LB_COL = { total: 'total_ace', storm: 'best_storm_ace', peak: 'best_peak_kt' };
+  function lbCell(r) { return Number(r[LB_COL[lbBoard]]); }
+  function lbFmt(v) { return lbBoard === 'peak' ? Math.round(v) + ' kt' : Number(v).toFixed(1) + ' ACE'; }
   function renderLbList() {
     var ol = $('lb-list'), board = lbCache[lbViewMode];
     if (!board) { ol.classList.add('hidden'); ol.innerHTML = ''; return; }   // still loading
-    var rows = board[lbMetric] || [];
+    var rows = board[lbBoard] || [];
     if (!rows.length) {
       ol.classList.remove('hidden');
       ol.innerHTML = '<li class="lb-empty">No scores yet — be the first!</li>';
       return;
     }
+    var boardObj = lbBoard === 'peak' ? 'vmax' : 'ace', tol = lbBoard === 'peak' ? 1 : 0.05;
     ol.innerHTML = rows.map(function (r, i) {
-      var me = lbMine && lbMine.mode === lbViewMode && r.name === lbMine.name &&
-        Math.abs(Number(lbVal(r, lbMetric)) - lbMine[lbMetric]) < 0.05;
+      var me = lbMine && lbMine.mode === lbViewMode && lbMine.objective === boardObj &&
+        r.name === lbMine.name && Math.abs(lbCell(r) - lbMine[lbBoard]) < tol;
       return '<li class="lb-entry' + (me ? ' me' : '') + '">' +
         '<span class="lb-rank">' + (i + 1) + '</span>' +
         '<span class="lb-name">' + escapeHtml(r.name) + '</span>' +
-        '<span class="lb-ace">' + Number(lbVal(r, lbMetric)).toFixed(1) + ' ACE</span></li>';
+        '<span class="lb-ace">' + lbFmt(lbCell(r)) + '</span></li>';
     }).join('');
     ol.classList.remove('hidden');
   }
   function loadBoards(mode) {
     if (lbCache[mode]) { if (mode === lbViewMode) renderLbList(); return Promise.resolve(); }
-    return Promise.all([Leaderboard.top('total', mode, 20), Leaderboard.top('storm', mode, 20)])
-      .then(function (res) { lbCache[mode] = { total: res[0], storm: res[1] }; if (mode === lbViewMode) renderLbList(); });
+    return Promise.all([Leaderboard.top('total', mode, 20), Leaderboard.top('storm', mode, 20), Leaderboard.top('peak', mode, 20)])
+      .then(function (res) { lbCache[mode] = { total: res[0], storm: res[1], peak: res[2] }; if (mode === lbViewMode) renderLbList(); });
   }
-  function setLbMetric(metric) {
-    lbMetric = metric;
+  function setLbBoard(board) {
+    lbBoard = board;
     [].forEach.call(document.querySelectorAll('.lb-tab'), function (b) {
-      b.classList.toggle('is-active', b.getAttribute('data-metric') === metric);
+      b.classList.toggle('is-active', b.getAttribute('data-board') === board);
     });
     renderLbList();
   }
@@ -925,11 +966,13 @@
     renderLbList();          // show cached (or loading) immediately…
     loadBoards(mode);        // …then fill in
   }
-  function renderLeaderboard(total, avgPct, isBest, prevBest) {
+  function renderLeaderboard(headline, avgPct, isBest, prevBest) {
+    var vmax = game.objective === 'vmax';
+    var fmt = function (x) { return vmax ? Math.round(x) + ' kt' : Number(x).toFixed(1) + ' ACE'; };
     // Personal best line (always shown — works with no backend).
     $('leaderboard').innerHTML = isBest
-      ? '<svg class="lb-ic"><use href="#ic-trophy"/></svg> New personal best! <b>' + total.toFixed(1) + ' ACE</b>'
-      : 'Personal best: <b>' + Math.max(prevBest, total).toFixed(1) + ' ACE</b>';
+      ? '<svg class="lb-ic"><use href="#ic-trophy"/></svg> New personal best! <b>' + fmt(headline) + '</b>'
+      : 'Personal best: <b>' + fmt(Math.max(prevBest, headline)) + '</b>';
 
     var sub = $('lb-submit'), controls = $('lb-controls');
     if (!window.Leaderboard || !Leaderboard.configured()) {
@@ -941,8 +984,8 @@
     var nm = $('lb-name'); nm.value = ''; nm.disabled = false;
     $('lb-submit-btn').disabled = false;
     controls.classList.remove('hidden');
-    setLbMetric('total');
-    setLbViewMode(game.mode);   // default to the basin you just played
+    setLbBoard(vmax ? 'peak' : 'total');     // default to the board matching your objective
+    setLbViewMode(game.mode);                // default to the basin you just played
   }
   function submitScore() {
     if (!window.Leaderboard || !Leaderboard.configured() || $('lb-name').disabled) return;
@@ -951,13 +994,17 @@
     if (err) { msg.textContent = err; msg.className = 'lb-msg err'; return; }
     $('lb-submit-btn').disabled = true;
     msg.textContent = 'Submitting…'; msg.className = 'lb-msg';
-    var avgPct = Math.round(game.total / ROUNDS), storm = bestStormAce(), mode = game.mode;
-    Leaderboard.submit(name, game.totalAce, storm, avgPct, mode).then(function () {
+    var avgPct = Math.round(game.total / ROUNDS), mode = game.mode, obj = game.objective;
+    var m = { totalAce: game.totalAce, bestStormAce: bestStormAce(), bestPeakKt: bestPeakKt() };
+    Leaderboard.submit(name, mode, obj, m, avgPct).then(function () {
       msg.textContent = 'Added to the board!'; msg.className = 'lb-msg ok';
       $('lb-submit').classList.add('done'); $('lb-name').disabled = true;
-      track('score_submit', { mode: mode, total_ace: Number(game.totalAce.toFixed(1)), best_storm_ace: Number(storm.toFixed(1)) });
-      lbMine = { name: name.trim(), total: Number(game.totalAce.toFixed(1)), storm: Number(storm.toFixed(1)), mode: mode };
+      track('score_submit', { mode: mode, objective: obj, total_ace: Number(m.totalAce.toFixed(1)),
+        best_storm_ace: Number(m.bestStormAce.toFixed(1)), best_peak_kt: Number(m.bestPeakKt.toFixed(1)) });
+      lbMine = { name: name.trim(), mode: mode, objective: obj,
+        total: Number(m.totalAce.toFixed(1)), storm: Number(m.bestStormAce.toFixed(1)), peak: Number(m.bestPeakKt.toFixed(1)) };
       delete lbCache[mode];          // refetch so your new row appears
+      setLbBoard(obj === 'vmax' ? 'peak' : 'total');
       setLbViewMode(mode);
     }).catch(function (e) {
       msg.textContent = e.message || 'Could not submit.'; msg.className = 'lb-msg err';
@@ -985,9 +1032,18 @@
         });
       });
     });
+    // objective picker (intro): maximize ACE vs peak intensity
+    [].forEach.call(document.querySelectorAll('.obj-opt'), function (b) {
+      b.addEventListener('click', function () {
+        selectedObjective = b.getAttribute('data-obj');
+        [].forEach.call(document.querySelectorAll('.obj-opt'), function (o) {
+          o.classList.toggle('is-active', o === b);
+        });
+      });
+    });
     $('lb-basin').addEventListener('change', function () { setLbViewMode(this.value); });
     [].forEach.call(document.querySelectorAll('.lb-tab'), function (b) {
-      b.addEventListener('click', function () { setLbMetric(b.getAttribute('data-metric')); });
+      b.addEventListener('click', function () { setLbBoard(b.getAttribute('data-board')); });
     });
     // Independent layers: flow (base) + optional shear contours + optional MPI.
     $('tog-flow').addEventListener('change', function () { if (env) renderFlow(); });

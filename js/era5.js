@@ -24,7 +24,8 @@
   // by plain path, so a content change must bump this or returning visitors can
   // mix a cached old manifest with new tiles (vmin/vmax mismatch → garbage decode).
   // v2 = environmental (850-mb vortex-removed) shear/steering pack.
-  var DV = '?v=' + (CFG.version || '2');
+  // v3 = added 0.1° land-fraction mask (manifest gained a 'landmask' entry).
+  var DV = '?v=' + (CFG.version || '3');
 
   var NAN = 0xFFFF;
   var _manifest = null;     // Promise<manifest>
@@ -98,6 +99,18 @@
     });
   }
 
+  // High-resolution (0.1°) land-fraction grid for graded land decay (independent
+  // of the coarse 1° SST). Resolves small islands. Returns null if absent.
+  function loadLandMask() {
+    return loadManifest().then(function (man) {
+      var t = man.landmask;
+      if (!t) return null;
+      return fetchDecode(BASE + '/landmask.bin.gz' + DV, t.vmin, t.vmax).then(function (values) {
+        return { values: values, grid: t.grid };
+      });
+    });
+  }
+
   // NaN-safe bilinear sample. `values` is one grid frame (ny*nx).
   function bilinear(values, grid, lat, lon) {
     var fi = (lat - grid.lat0) / grid.dlat;   // fractional row
@@ -142,6 +155,7 @@
     loadDailyField: loadDailyField,
     loadDailyFieldSpan: loadDailyFieldSpan,
     loadSST: loadSST,
+    loadLandMask: loadLandMask,
     fetchDecode: fetchDecode,
     bilinear: bilinear,
     dayFrame: dayFrame,
