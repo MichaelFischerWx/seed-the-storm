@@ -463,20 +463,20 @@
     game.total += pct; game.totalAce += chosen.ace;
     updateScoreBadge();
 
-    // Was there actually a "monster" to miss? Only if the best seed became a
-    // hurricane — otherwise it was a hostile round and missing isn't on you.
-    var hadMonster = best.peakV >= 64;
+    // Did any seed actually reach hurricane strength? If not, it was a hostile
+    // round and a lower score isn't on the player.
+    var hadHurricane = best.peakV >= 64;
     var v = $('verdict'), cls, msg, icon;
     if (chosenIdx === bi) {
       cls = 'win';
-      if (hadMonster) { icon = 'ic-target'; msg = 'Bullseye — you picked the best seed!'; }
+      if (hadHurricane) { icon = 'ic-target'; msg = 'Bullseye — you picked the best seed!'; }
       else { icon = 'ic-trophy'; msg = 'Best of a quiet bunch — you found the strongest!'; }
-    } else if (!hadMonster) {
+    } else if (!hadHurricane) {
       cls = 'ok'; icon = 'ic-neutral'; msg = 'Quiet round — nothing really spun up.';
     } else if (pct >= 75) {
       cls = 'ok'; icon = 'ic-check'; msg = 'Close — a strong pick.';
     } else {
-      cls = 'miss'; icon = 'ic-wind'; msg = 'Missed the monster.';
+      cls = 'miss'; icon = 'ic-wind'; msg = 'A stronger storm was in reach.';
     }
     v.className = 'verdict ' + cls;
     v.innerHTML = '<svg class="v-ic"><use href="#' + icon + '"/></svg>';
@@ -510,23 +510,33 @@
     if (r.endReason === 'left-basin') return 'crossed Central America into the East Pacific ' +
       '— out of the Atlantic basin, so its ACE there doesn’t count';
     if (r.peakV < 34) return 'never organized past a depression';
-    if (r.madeLandfall && r.peakV < 85) return 'made landfall and spun down before maturing';
-    if (r.maxShear > 18 && r.peakV < 85) return 'ran into hostile shear (~' + Math.round(r.maxShear) + ' m/s)';
-    if (r.recurved) return 'recurved into the open North Atlantic';
-    if (r.peakV >= 96) return 'sat over warm, low-shear water and roared to a major ' +
-      'hurricane (Cat ' + r.peakCat + ', ' + Math.round(r.peakV) + ' kt)';
-    if (r.peakV >= 64) return 'became a Cat ' + r.peakCat + ' hurricane (' +
-      Math.round(r.peakV) + ' kt)';
-    return 'held on as a ' + Math.round(r.peakV) + '-kt tropical storm';
+
+    var kt = Math.round(r.peakV);
+    var peak = r.peakV >= 96 ? 'a major hurricane (Cat ' + r.peakCat + ', ' + kt + ' kt)'
+             : r.peakV >= 64 ? 'a Cat ' + r.peakCat + ' hurricane (' + kt + ' kt)'
+             : 'a ' + kt + '-kt tropical storm';
+
+    // Landfall is the headline if it happened — a storm that hit land isn't a
+    // clean recurve, so this is checked before the recurve branch.
+    if (r.madeLandfall) {
+      return r.peakV >= 64 ? 'peaked as ' + peak + ' and made landfall'
+                           : 'made landfall and spun down before maturing';
+    }
+    if (r.maxShear > 18 && r.peakV < 85) return 'ran into hostile shear (~' +
+      Math.round(r.maxShear) + ' m/s) and never matured';
+    if (r.recurved) return 'reached ' + peak + ', recurving into the open North Atlantic';
+    if (r.peakV >= 96) return 'sat over warm, low-shear water and roared to ' + peak;
+    if (r.peakV >= 64) return 'became ' + peak;
+    return 'held on as ' + peak;
   }
 
   function teachText(chosen, best, ci, bi) {
-    var hadMonster = best.peakV >= 64;
-    if (!hadMonster) {
+    var hadHurricane = best.peakV >= 64;
+    if (!hadHurricane) {
       // No seed reached hurricane strength — a hostile round, not a bad pick.
       return 'A hostile round — every seed ran into shear, dry air, or land, so even the ' +
         'best (<b>seed ' + SEED_LABELS[bi] + '</b>) only reached ' + Math.round(best.peakV) +
-        ' kt. No monster to be had this time; some weeks the basin just won’t cooperate.';
+        ' kt. No hurricane in the cards this time; some weeks the basin just won’t cooperate.';
     }
     if (ci === bi) {
       return '<b>Seed ' + SEED_LABELS[ci] + '</b> ' + describe(chosen) +
@@ -555,7 +565,7 @@
     var ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h);
     var big = w > 520;
     var fs = big ? 13 : 10, lwV = big ? 3.4 : 2.4;
-    var padL = big ? 40 : 30, padR = big ? 46 : 34, padT = big ? 26 : 12, padB = big ? 26 : 16;
+    var padL = big ? 54 : 44, padR = big ? 46 : 34, padT = big ? 26 : 12, padB = big ? 26 : 16;
 
     var maxTrackHr = 24;
     results.forEach(function (r) { maxTrackHr = Math.max(maxTrackHr, r.track[r.track.length - 1].hr); });
@@ -563,7 +573,7 @@
     function X(hr) { return padL + (w - padL - padR) * hr / maxHr; }
     function Y(v) { return padT + (h - padT - padB) * (1 - v / maxV); }
     function Ysh(kt) { return padT + (h - padT - padB) * (1 - kt / maxSh); }
-    ctx.font = fs + 'px Inter, system-ui, sans-serif'; ctx.textBaseline = 'middle';
+    ctx.font = fs + "px 'DM Sans', system-ui, sans-serif"; ctx.textBaseline = 'middle';
 
     // Category gridlines + left (intensity) axis.
     ctx.strokeStyle = 'rgba(36,51,82,.85)'; ctx.fillStyle = '#687c9f'; ctx.lineWidth = 1;
@@ -573,6 +583,7 @@
     });
 
     var showShear = $('tog-track-shear') && $('tog-track-shear').checked;
+    var showMpi = $('tog-track-mpi') && $('tog-track-mpi').checked;
     var cpts = results[chosenIdx].track;
 
     // Right (shear) axis ticks, drawn only when the shear line is on.
@@ -604,6 +615,16 @@
       ctx.stroke(); ctx.setLineDash([]);
     }
 
+    // Potential intensity (MPI, kt) — the ceiling the storm relaxes toward.
+    // Same left axis as V, so the gap to the intensity curve is the unrealized
+    // potential (lost to shear, dry air, land, or simply too little time).
+    if (showMpi) {
+      ctx.setLineDash([2, 3]); ctx.strokeStyle = 'rgba(232,194,106,0.9)'; ctx.lineWidth = big ? 2 : 1.5;
+      ctx.beginPath();
+      cpts.forEach(function (p, k) { var x = X(p.hr), y = Y(Math.min(maxV, p.mpi)); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+      ctx.stroke(); ctx.setLineDash([]);
+    }
+
     // Chosen storm V, coloured by Saffir–Simpson category.
     ctx.lineWidth = lwV; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     for (var k = 1; k < cpts.length; k++) {
@@ -620,11 +641,17 @@
     var lx = padL, ly = padT - (big ? 14 : 6);
     ctx.strokeStyle = '#ff9a3c'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(lx + 16, ly); ctx.stroke();
     ctx.fillStyle = '#9fb1d0'; ctx.fillText('intensity (kt)', lx + 22, ly);
+    var lx2 = lx + (big ? 130 : 104);
     if (showShear) {
-      var lx2 = lx + (big ? 130 : 104);
       ctx.setLineDash([5, 4]); ctx.strokeStyle = 'rgba(214,224,242,0.85)'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(lx2, ly); ctx.lineTo(lx2 + 16, ly); ctx.stroke(); ctx.setLineDash([]);
-      ctx.fillText('shear (kt)', lx2 + 22, ly);
+      ctx.fillStyle = '#9fb1d0'; ctx.fillText('shear (kt)', lx2 + 22, ly);
+      lx2 += (big ? 96 : 78);
+    }
+    if (showMpi) {
+      ctx.setLineDash([2, 3]); ctx.strokeStyle = 'rgba(232,194,106,0.9)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(lx2, ly); ctx.lineTo(lx2 + 16, ly); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = '#9fb1d0'; ctx.fillText('MPI (kt)', lx2 + 22, ly);
     }
   }
 
@@ -836,6 +863,7 @@
     $('tog-shear').addEventListener('change', function () { if (env) renderShear(); });
     $('tog-mpi').addEventListener('change', function () { if (env) renderMpi(); });
     $('tog-track-shear').addEventListener('change', function () { if (results) drawIntensityChart(); });
+    $('tog-track-mpi').addEventListener('change', function () { if (results) drawIntensityChart(); });
     $('chart-expand').addEventListener('click', openChartModal);
     $('chart-modal-close').addEventListener('click', closeChartModal);
     $('chart-modal').addEventListener('click', function (e) { if (e.target === this) closeChartModal(); });

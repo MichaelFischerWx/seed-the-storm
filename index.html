@@ -123,15 +123,15 @@
               against the best possible pick.</li>
           </ol>
           <p class="hint">Warm water + low shear + a long track over open ocean = big ACE.
-            Land and shear are storm-killers.</p>
+            Land and shear pull storms apart.</p>
           <button id="start-btn" class="btn btn-primary btn-block">Start game</button>
         </section>
 
         <!-- Stage: pick -->
         <section id="stage-pick" class="stage hidden">
           <h2>Choose your seed</h2>
-          <p class="muted">Tap a pin on the map, or a seed below. Which one becomes the
-            beast?</p>
+          <p class="muted">Tap a pin on the map, or a seed below. Which one grows into the
+            strongest storm?</p>
           <ul id="seed-list" class="seed-list"></ul>
           <div class="env-toggles">
             <label><input type="checkbox" id="tog-flow" checked /> Steering flow
@@ -154,7 +154,10 @@
             <canvas id="intensity-chart" width="320" height="160"></canvas>
             <button id="chart-expand" class="icon-btn chart-expand" title="Expand chart"><svg class="btn-ic" aria-hidden="true"><use href="#ic-expand"/></svg></button>
           </div>
-          <label class="chart-toggle"><input type="checkbox" id="tog-track-shear" /> Shear along track</label>
+          <div class="chart-toggles">
+            <label class="chart-toggle"><input type="checkbox" id="tog-track-shear" /> Shear along track</label>
+            <label class="chart-toggle"><input type="checkbox" id="tog-track-mpi" /> Potential intensity (MPI)</label>
+          </div>
           <ul id="result-list" class="result-list"></ul>
           <p id="teach" class="teach"></p>
           <div class="result-actions">
@@ -191,7 +194,7 @@
   <div id="chart-modal" class="modal hidden">
     <div class="modal-card">
       <div class="modal-head">
-        <span>Intensity &amp; shear along the chosen storm's track</span>
+        <span>Intensity, shear &amp; potential along the chosen storm's track</span>
         <button id="chart-modal-close" class="icon-btn" title="Close"><svg class="btn-ic" aria-hidden="true"><use href="#ic-close"/></svg></button>
       </div>
       <canvas id="chart-modal-canvas"></canvas>
