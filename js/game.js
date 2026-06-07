@@ -719,7 +719,9 @@
         else shearLayer = L.imageOverlay(url, fieldBounds(), { opacity: 0.55, pane: fieldPane() });
         if (!map.hasLayer(shearLayer)) shearLayer.addTo(map);
         showCoastlines(true);
-        updateMapLegend('shear');
+        // No colorbar on the home screen — it belongs to gameplay and would
+        // just cover the preview (especially on mobile). It appears once a
+        // round is dealt (renderShear → updateMapLegend).
         renderGenesisHints(month);
         showAttractCaption(month, year);
       });

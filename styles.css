@@ -332,7 +332,12 @@ svg.ic, .brand-mark, .btn-ic, .v-ic { display: inline-block; fill: none; }
   .btn { padding: 8px 11px; }
   #deal-btn { font-size: 12.5px; }
   #panel { padding: 16px; max-height: 50vh; }
-  .map-legend { width: 148px; left: 10px; bottom: 12px; padding: 8px 10px; }
+  /* compact, low-profile colorbar so it covers as little of the short map as possible */
+  .map-legend { width: 116px; left: 8px; bottom: 8px; padding: 6px 8px; opacity: .92; }
+  .map-legend .ml-title { font-size: 9px; margin-bottom: 4px; }
+  .map-legend .ml-bar { height: 7px; }
+  .map-legend .ml-ticks { font-size: 8.5px; }
+  .map-legend .ml-sem { font-size: 7.5px; }
   .attract-cap { bottom: 14px; padding: 7px 12px; font-size: 11px; max-width: 94%; }
   .attract-cap .ac-sub { display: none; }  /* keep it to one short line on phones */
 }
