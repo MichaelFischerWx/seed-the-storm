@@ -57,21 +57,28 @@
   }
 
   // ---- REST ----
-  function top(n) {
+  // metric: 'total' (whole-game ACE) or 'storm' (best single-storm ACE).
+  function top(metric, n) {
     if (!ok) return Promise.resolve([]);
-    var url = BASE + '?select=name,ace,avg_pct&order=ace.desc,created_at.asc&limit=' + (n || 20);
+    var col = metric === 'storm' ? 'best_storm_ace' : 'total_ace';
+    var url = BASE + '?select=name,total_ace,best_storm_ace&order=' + col + '.desc,created_at.asc&limit=' + (n || 20);
     return fetch(url, { headers: headers() })
       .then(function (r) { return r.ok ? r.json() : []; })
       .catch(function () { return []; });
   }
-  function submit(name, ace, avgPct) {
+  function submit(name, totalAce, bestStormAce, avgPct) {
     if (!ok) return Promise.reject(new Error('Leaderboard not configured.'));
     var err = validName(name);
     if (err) return Promise.reject(new Error(err));
     return fetch(BASE, {
       method: 'POST',
       headers: headers({ 'Content-Type': 'application/json', Prefer: 'return=representation' }),
-      body: JSON.stringify({ name: name.trim(), ace: Number(ace.toFixed(1)), avg_pct: Math.round(avgPct) }),
+      body: JSON.stringify({
+        name: name.trim(),
+        total_ace: Number(totalAce.toFixed(1)),
+        best_storm_ace: Number(bestStormAce.toFixed(1)),
+        avg_pct: Math.round(avgPct),
+      }),
     }).then(function (r) {
       if (r.ok) return r.json();
       return r.json().catch(function () { return {}; }).then(function (e) {

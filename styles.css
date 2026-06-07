@@ -246,6 +246,15 @@ svg.ic, .brand-mark, .btn-ic, .v-ic { display: inline-block; fill: none; }
   font-size: 12.5px; color: var(--ink-dim); }
 .leaderboard b { color: var(--good); }
 
+/* leaderboard: segmented board toggle */
+.lb-tabs { display: flex; gap: 4px; margin: 2px 0 8px; padding: 3px;
+  background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: var(--r-sm); }
+.lb-tab { flex: 1; font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer;
+  color: var(--ink-dim); background: transparent; border: 0; border-radius: 6px; padding: 6px 8px;
+  transition: background .14s, color .14s; }
+.lb-tab:hover { color: var(--ink); }
+.lb-tab.is-active { background: var(--accent); color: var(--accent-ink); }
+
 /* leaderboard: name entry + global top list */
 .lb-submit { margin: 4px 0 12px; }
 .lb-submit.done .lb-row { opacity: .55; }

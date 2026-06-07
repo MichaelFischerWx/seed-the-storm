@@ -801,17 +801,38 @@
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
   }
-  function renderLbList(rows, hiName, hiAce) {
-    var ol = $('lb-list');
+  // The best single-storm ACE this game = the highest chosen-seed ACE across rounds.
+  function bestStormAce() {
+    return game.rows.reduce(function (m, r) { return Math.max(m, r.ace); }, 0);
+  }
+  var lbMetric = 'total';                 // which board is showing: 'total' | 'storm'
+  var lbCache = { total: null, storm: null };
+  var lbMine = null;                       // {name, total, storm} for highlighting your row
+
+  function lbVal(r, metric) { return metric === 'storm' ? r.best_storm_ace : r.total_ace; }
+  function renderLbList() {
+    var ol = $('lb-list'), rows = lbCache[lbMetric];
     if (!rows || !rows.length) { ol.classList.add('hidden'); ol.innerHTML = ''; return; }
     ol.innerHTML = rows.map(function (r, i) {
-      var me = hiName && r.name === hiName && Math.abs(r.ace - hiAce) < 0.05;
+      var me = lbMine && r.name === lbMine.name &&
+        Math.abs(Number(lbVal(r, lbMetric)) - lbMine[lbMetric]) < 0.05;
       return '<li class="lb-entry' + (me ? ' me' : '') + '">' +
         '<span class="lb-rank">' + (i + 1) + '</span>' +
         '<span class="lb-name">' + escapeHtml(r.name) + '</span>' +
-        '<span class="lb-ace">' + Number(r.ace).toFixed(1) + ' ACE</span></li>';
+        '<span class="lb-ace">' + Number(lbVal(r, lbMetric)).toFixed(1) + ' ACE</span></li>';
     }).join('');
     ol.classList.remove('hidden');
+  }
+  function loadBoards() {
+    return Promise.all([Leaderboard.top('total', 20), Leaderboard.top('storm', 20)])
+      .then(function (res) { lbCache.total = res[0]; lbCache.storm = res[1]; renderLbList(); });
+  }
+  function setLbMetric(metric) {
+    lbMetric = metric;
+    [].forEach.call(document.querySelectorAll('.lb-tab'), function (b) {
+      b.classList.toggle('is-active', b.getAttribute('data-metric') === metric);
+    });
+    renderLbList();
   }
   function renderLeaderboard(total, avgPct, isBest, prevBest) {
     // Personal best line (always shown — works with no backend).
@@ -819,15 +840,17 @@
       ? '<svg class="lb-ic"><use href="#ic-trophy"/></svg> New personal best! <b>' + total.toFixed(1) + ' ACE</b>'
       : 'Personal best: <b>' + Math.max(prevBest, total).toFixed(1) + ' ACE</b>';
 
-    var sub = $('lb-submit');
+    var sub = $('lb-submit'), tabs = $('lb-tabs');
     if (!window.Leaderboard || !Leaderboard.configured()) {
-      sub.classList.add('hidden'); $('lb-list').classList.add('hidden'); return;
+      sub.classList.add('hidden'); tabs.classList.add('hidden'); $('lb-list').classList.add('hidden'); return;
     }
+    lbMine = null; lbCache = { total: null, storm: null };
     sub.classList.remove('hidden'); sub.classList.remove('done');
     var msg = $('lb-msg'); msg.textContent = ''; msg.className = 'lb-msg';
     var nm = $('lb-name'); nm.value = ''; nm.disabled = false;
     $('lb-submit-btn').disabled = false;
-    Leaderboard.top(20).then(function (rows) { renderLbList(rows); });
+    tabs.classList.remove('hidden'); setLbMetric('total');
+    loadBoards();
   }
   function submitScore() {
     if (!window.Leaderboard || !Leaderboard.configured() || $('lb-name').disabled) return;
@@ -836,13 +859,12 @@
     if (err) { msg.textContent = err; msg.className = 'lb-msg err'; return; }
     $('lb-submit-btn').disabled = true;
     msg.textContent = 'Submitting…'; msg.className = 'lb-msg';
-    var avgPct = Math.round(game.total / ROUNDS);
-    Leaderboard.submit(name, game.totalAce, avgPct).then(function () {
+    var avgPct = Math.round(game.total / ROUNDS), storm = bestStormAce();
+    Leaderboard.submit(name, game.totalAce, storm, avgPct).then(function () {
       msg.textContent = 'Added to the board!'; msg.className = 'lb-msg ok';
       $('lb-submit').classList.add('done'); $('lb-name').disabled = true;
-      return Leaderboard.top(20);
-    }).then(function (rows) {
-      renderLbList(rows, name.trim(), Number(game.totalAce.toFixed(1)));
+      lbMine = { name: name.trim(), total: Number(game.totalAce.toFixed(1)), storm: Number(storm.toFixed(1)) };
+      return loadBoards();
     }).catch(function (e) {
       msg.textContent = e.message || 'Could not submit.'; msg.className = 'lb-msg err';
       $('lb-submit-btn').disabled = false;
@@ -860,6 +882,9 @@
     $('again-btn').addEventListener('click', startGame);    // summary -> play again
     $('lb-submit-btn').addEventListener('click', submitScore);
     $('lb-name').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); submitScore(); } });
+    [].forEach.call(document.querySelectorAll('.lb-tab'), function (b) {
+      b.addEventListener('click', function () { setLbMetric(b.getAttribute('data-metric')); });
+    });
     // Independent layers: flow (base) + optional shear contours + optional MPI.
     $('tog-flow').addEventListener('change', function () { if (env) renderFlow(); });
     $('tog-shear').addEventListener('change', function () { if (env) renderShear(); });

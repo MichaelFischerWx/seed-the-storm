@@ -9,27 +9,31 @@
 --     (The anon key is meant to be public; safety comes from RLS + the trigger below.)
 --
 --  WHAT THIS DOES
---  - scores table: name, ace, avg_pct, created_at.
+--  - scores table: name, total_ace, best_storm_ace, avg_pct, created_at.
 --  - Row-Level Security: anyone may READ and INSERT; nobody may UPDATE/DELETE
 --    (you can still delete rows yourself from the dashboard to moderate).
 --  - A BEFORE INSERT trigger validates length/characters AND rejects profanity
 --    server-side (de-leetspeaks + collapses repeats, then substring-matches a
 --    denylist) so it can't be bypassed by editing the page.
---  - ace is bounded (0–300) to reject garbage submissions.
+--  - total_ace (0–300) and best_storm_ace (0–100) are bounded to reject garbage.
 --
 --  To extend the word filter, edit the `bad` array in scores_validate() and the
 --  matching BAD list in js/leaderboard.js, then re-run this file.
 -- ============================================================================
 
 create table if not exists public.scores (
-  id         bigint generated always as identity primary key,
-  name       text not null,
-  ace        numeric(6,1) not null check (ace >= 0 and ace <= 300),
-  avg_pct    int check (avg_pct between 0 and 100),
-  created_at timestamptz not null default now()
+  id             bigint generated always as identity primary key,
+  name           text not null,
+  total_ace      numeric(6,1) not null check (total_ace >= 0 and total_ace <= 300),
+  best_storm_ace numeric(6,1) not null check (best_storm_ace >= 0 and best_storm_ace <= 100),
+  avg_pct        int check (avg_pct between 0 and 100),
+  created_at     timestamptz not null default now()
 );
 
-create index if not exists scores_ace_idx on public.scores (ace desc, created_at asc);
+-- Two leaderboards from one table: highest total ACE (the whole 6-round game)
+-- and highest single-storm ACE (the best individual storm in that game).
+create index if not exists scores_total_idx on public.scores (total_ace desc, created_at asc);
+create index if not exists scores_storm_idx on public.scores (best_storm_ace desc, created_at asc);
 
 -- Normalize a name for matching: lowercase → de-leetspeak → letters only.
 -- Mirrors norm() in js/leaderboard.js.
