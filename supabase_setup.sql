@@ -9,14 +9,17 @@
 --     (The anon key is meant to be public; safety comes from RLS + the trigger below.)
 --
 --  WHAT THIS DOES
---  - scores table: name, mode, total_ace, best_storm_ace, avg_pct, created_at.
---    (mode = which basin: atl / epac / wpac / nio / nh; one leaderboard per mode.)
---  - Row-Level Security: anyone may READ and INSERT; nobody may UPDATE/DELETE
---    (you can still delete rows yourself from the dashboard to moderate).
---  - A BEFORE INSERT trigger validates length/characters AND rejects profanity
---    server-side (de-leetspeaks + collapses repeats, then substring-matches a
---    denylist) so it can't be bypassed by editing the page.
---  - total_ace (0–300) and best_storm_ace (0–100) are bounded to reject garbage.
+--  - scores table: name (NULLABLE), mode, objective, total_ace, best_storm_ace,
+--    best_peak_kt, avg_pct, created_at. EVERY completed game is recorded as an
+--    anonymous row (name NULL) so we can rank players by percentile; attaching a
+--    name (opt-in) "claims" that row onto the public leaderboard. (20-0 style.)
+--  - Row-Level Security: anyone may READ + INSERT; UPDATE is allowed ONLY to set
+--    a name on a still-anonymous row (column-restricted to `name`), so a player
+--    can claim their own row but nobody can alter scores or rename named rows.
+--  - A BEFORE INSERT/UPDATE trigger validates length/characters AND rejects
+--    profanity server-side (de-leetspeaks + collapses repeats vs a denylist);
+--    anonymous (NULL-name) rows skip validation.
+--  - total_ace (0–300), best_storm_ace (0–100), best_peak_kt (0–220) bounded.
 --
 --  To extend the word filter, edit the `bad` array in scores_validate() and the
 --  matching BAD list in js/leaderboard.js, then re-run this file.
@@ -24,7 +27,7 @@
 
 create table if not exists public.scores (
   id             bigint generated always as identity primary key,
-  name           text not null,
+  name           text,   -- NULL = anonymous (records the game for ranking); set = on the public board
   mode           text not null default 'atl' check (mode in ('atl','epac','wpac','nio','nh')),
   objective      text not null default 'ace' check (objective in ('ace','vmax')),
   total_ace      numeric(6,1) not null check (total_ace >= 0 and total_ace <= 300),
@@ -39,6 +42,9 @@ create table if not exists public.scores (
 create index if not exists scores_total_idx on public.scores (mode, objective, total_ace desc, created_at asc);
 create index if not exists scores_storm_idx on public.scores (mode, objective, best_storm_ace desc, created_at asc);
 create index if not exists scores_peak_idx  on public.scores (mode, objective, best_peak_kt desc, created_at asc);
+
+-- Existing installs created `name` NOT NULL — relax it so anonymous rows record.
+alter table public.scores alter column name drop not null;
 
 -- Normalize a name for matching: lowercase → de-leetspeak → letters only.
 -- Mirrors norm() in js/leaderboard.js.
@@ -63,7 +69,8 @@ declare
     'fag','retard','spic','chink','kike','wetback','coon','tranny','kkk','sex','anal','orgy'
   ];
 begin
-  new.name := btrim(new.name);
+  if new.name is not null then new.name := btrim(new.name); end if;
+  if new.name is null or new.name = '' then new.name := null; return new; end if;  -- anonymous: skip
   if char_length(new.name) < 3 or char_length(new.name) > 12 then
     raise exception 'name length not allowed' using errcode = 'check_violation';
   end if;
@@ -86,7 +93,13 @@ create trigger trg_scores_validate
   before insert on public.scores
   for each row execute function public.scores_validate();
 
--- Row-Level Security: public read + insert, no update/delete.
+-- Same validation when a player later attaches a name (claims their row).
+drop trigger if exists trg_scores_validate_upd on public.scores;
+create trigger trg_scores_validate_upd
+  before update on public.scores
+  for each row execute function public.scores_validate();
+
+-- Row-Level Security: public read + insert; UPDATE only to name a still-anonymous row.
 alter table public.scores enable row level security;
 
 drop policy if exists scores_read on public.scores;
@@ -95,9 +108,16 @@ create policy scores_read   on public.scores for select using (true);
 drop policy if exists scores_insert on public.scores;
 create policy scores_insert on public.scores for insert with check (true);
 
+-- Claim: a player may set a name on their own anonymous row. `using (name is null)`
+-- forbids renaming already-named rows; the column grant below forbids touching any
+-- column except `name`, so scores can't be tampered with.
+drop policy if exists scores_claim_name on public.scores;
+create policy scores_claim_name on public.scores for update using (name is null) with check (true);
+
 -- Grant the anonymous (and logged-in) API roles access to the table.
 grant usage on schema public to anon, authenticated;
 grant select, insert on public.scores to anon, authenticated;
+grant update (name) on public.scores to anon, authenticated;
 
 -- ----------------------------------------------------------------------------
 --  OPTIONAL HARDENING (not required):

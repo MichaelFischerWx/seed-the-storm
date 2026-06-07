@@ -928,6 +928,7 @@
   var lbViewMode = 'atl';                  // which basin board is displayed
   var lbCache = {};                        // mode -> { total:[], storm:[], peak:[] }
   var lbMine = null;                       // { name, mode, objective, total, storm, peak }
+  var lbRowId = null;                       // id of this game's recorded (anonymous) row, to claim with a name
 
   var LB_COL = { total: 'total_ace', storm: 'best_storm_ace', peak: 'best_peak_kt' };
   function lbCell(r) { return Number(r[LB_COL[lbBoard]]); }
@@ -978,11 +979,12 @@
       ? '<svg class="lb-ic"><use href="#ic-trophy"/></svg> New personal best! <b>' + fmt(headline) + '</b>'
       : 'Personal best: <b>' + fmt(Math.max(prevBest, headline)) + '</b>';
 
-    var sub = $('lb-submit'), controls = $('lb-controls');
+    var sub = $('lb-submit'), controls = $('lb-controls'), rankEl = $('lb-rank');
     if (!window.Leaderboard || !Leaderboard.configured()) {
-      sub.classList.add('hidden'); controls.classList.add('hidden'); $('lb-list').classList.add('hidden'); return;
+      sub.classList.add('hidden'); controls.classList.add('hidden'); $('lb-list').classList.add('hidden');
+      rankEl.classList.add('hidden'); return;
     }
-    lbMine = null; lbCache = {};
+    lbMine = null; lbCache = {}; lbRowId = null;
     sub.classList.remove('hidden'); sub.classList.remove('done');
     var msg = $('lb-msg'); msg.textContent = ''; msg.className = 'lb-msg';
     var nm = $('lb-name'); nm.value = ''; nm.disabled = false;
@@ -990,28 +992,48 @@
     controls.classList.remove('hidden');
     setLbBoard(vmax ? 'peak' : 'total');     // default to the board matching your objective
     setLbViewMode(game.mode);                // default to the basin you just played
+
+    // Record this game anonymously, then show where it ranks (today + all-time)
+    // within the same basin × objective. Naming the board (below) is opt-in.
+    rankEl.classList.remove('hidden');
+    rankEl.innerHTML = '<span class="spinner"></span> Recording your game…';
+    var metrics = { totalAce: game.totalAce, bestStormAce: bestStormAce(), bestPeakKt: bestPeakKt() };
+    Leaderboard.record(game.mode, game.objective, metrics, avgPct).then(function (id) {
+      lbRowId = id;
+      return Leaderboard.rank(game.mode, game.objective, vmax ? metrics.bestPeakKt : metrics.totalAce);
+    }).then(function (rk) {
+      if (!rk) { rankEl.classList.add('hidden'); return; }
+      var line = function (label, r) {
+        var top = r.total > 0 ? Math.max(1, Math.round(100 * r.rank / r.total)) : 100;
+        return label + ' <b>#' + r.rank.toLocaleString() + '</b> of ' + r.total.toLocaleString() +
+          ' <span class="muted">(top ' + top + '%)</span>';
+      };
+      rankEl.innerHTML = '<svg class="lb-ic"><use href="#ic-trophy"/></svg> ' +
+        line('Today', rk.today) + ' &nbsp;·&nbsp; ' + line('All-time', rk.all);
+    }).catch(function () { rankEl.classList.add('hidden'); });
   }
   function submitScore() {
     if (!window.Leaderboard || !Leaderboard.configured() || $('lb-name').disabled) return;
     var name = $('lb-name').value, msg = $('lb-msg');
     var err = Leaderboard.validName(name);
     if (err) { msg.textContent = err; msg.className = 'lb-msg err'; return; }
+    if (lbRowId == null) { msg.textContent = 'Still recording your game — one moment…'; msg.className = 'lb-msg'; return; }
     $('lb-submit-btn').disabled = true;
-    msg.textContent = 'Submitting…'; msg.className = 'lb-msg';
-    var avgPct = Math.round(game.total / ROUNDS), mode = game.mode, obj = game.objective;
+    msg.textContent = 'Saving…'; msg.className = 'lb-msg';
+    var mode = game.mode, obj = game.objective;
     var m = { totalAce: game.totalAce, bestStormAce: bestStormAce(), bestPeakKt: bestPeakKt() };
-    Leaderboard.submit(name, mode, obj, m, avgPct).then(function () {
-      msg.textContent = 'Added to the board!'; msg.className = 'lb-msg ok';
+    Leaderboard.claim(lbRowId, name).then(function () {           // attach name to our recorded row
+      msg.textContent = 'On the board!'; msg.className = 'lb-msg ok';
       $('lb-submit').classList.add('done'); $('lb-name').disabled = true;
       track('score_submit', { mode: mode, objective: obj, total_ace: Number(m.totalAce.toFixed(1)),
         best_storm_ace: Number(m.bestStormAce.toFixed(1)), best_peak_kt: Number(m.bestPeakKt.toFixed(1)) });
       lbMine = { name: name.trim(), mode: mode, objective: obj,
         total: Number(m.totalAce.toFixed(1)), storm: Number(m.bestStormAce.toFixed(1)), peak: Number(m.bestPeakKt.toFixed(1)) };
-      delete lbCache[mode];          // refetch so your new row appears
+      delete lbCache[mode];          // refetch so your named row appears
       setLbBoard(obj === 'vmax' ? 'peak' : 'total');
       setLbViewMode(mode);
     }).catch(function (e) {
-      msg.textContent = e.message || 'Could not submit.'; msg.className = 'lb-msg err';
+      msg.textContent = e.message || 'Could not save.'; msg.className = 'lb-msg err';
       $('lb-submit-btn').disabled = false;
     });
   }
