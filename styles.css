@@ -383,7 +383,7 @@ svg.ic, .brand-mark, .btn-ic, .v-ic { display: inline-block; fill: none; }
 .lb-entry.me { background: var(--glow-soft); box-shadow: inset 2px 0 0 var(--accent-2); }
 /* the small rank NUMBER inside a leaderboard row — scoped to .lb-entry so it
    doesn't collide with the #lb-rank banner (which is also class="lb-rank"). */
-.lb-entry .lb-rank { width: 22px; flex: none; color: var(--ink-faint); font-family: var(--mono); font-size: 12px;
+.lb-entry .lb-rank { width: 22px; flex: none; text-align: center; color: var(--ink-faint); font-family: var(--mono); font-size: 12px;
   font-variant-numeric: tabular-nums; }
 .lb-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lb-ace { margin-left: auto; flex: none; color: var(--accent-2); font-weight: 600;

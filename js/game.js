@@ -91,7 +91,9 @@
     // Lock the view to the data band (0–60 °N, all lon) so the field always
     // fills the frame and the edges read as the map's frame, not missing data.
     map = L.map('map', {
-      worldCopyJump: false, minZoom: 4, maxZoom: 8, zoomSnap: 0.5, zoomDelta: 0.5,
+      // minZoom 3 lets the pick-stage fitBounds zoom out far enough to frame all
+      // four seeds even when they're spread wide across a basin on a narrow phone.
+      worldCopyJump: false, minZoom: 3, maxZoom: 8, zoomSnap: 0.5, zoomDelta: 0.5,
       maxBounds: [[0, -180], [60, 180]], maxBoundsViscosity: 1.0,
     }).setView([26, -52], 4.5);
     map.attributionControl.setPrefix(false);   // drop the "Leaflet" + flag prefix
@@ -288,8 +290,15 @@
       m.on('click', function () { selectSeed(i); });
       seedMarkers.push(m);
     });
+    // Frame ALL seeds with comfortable margins, leaving room for the top clock
+    // and the bottom-left field legend so no pin hides under an overlay.
     var grp = L.featureGroup(seedMarkers);
-    if (seedMarkers.length) map.fitBounds(grp.getBounds().pad(0.25), { animate: false, maxZoom: 5, padding: [24, 24] });
+    if (seedMarkers.length) {
+      map.fitBounds(grp.getBounds().pad(0.18), {
+        animate: false, maxZoom: 5,
+        paddingTopLeft: [24, 46], paddingBottomRight: [24, 30],
+      });
+    }
   }
 
   function fmtLoc(s) {
@@ -573,9 +582,18 @@
       if (shearLayer && p.hr - lastShearHr >= SHEAR_REBUILD_HR) {
         lastShearHr = p.hr; shearLayer.setUrl(shearUrlAt(env.startDayIdx + p.hr / 24));
       }
-      // Keep the storm centred (throttled, so the pan reads as smooth drift).
-      if (follow && !userPanned && ts - lastPanMs > 140) {
-        lastPanMs = ts; map.panTo([p.lat, p.lon], { animate: false });
+      // Smoothly keep the storm in view: only glide-recentre (animated pan)
+      // when it drifts into the outer 30% of the frame. Far fewer pans than a
+      // per-frame nudge, so the motion reads as one smooth camera move AND the
+      // flow layer (which clears+reseeds on every map move) isn't torn down
+      // constantly — both causes of the old jumpiness.
+      if (follow && !userPanned && ts - lastPanMs > 850) {
+        var cp = map.latLngToContainerPoint([p.lat, p.lon]), sz = map.getSize();
+        var mx = sz.x * 0.30, my = sz.y * 0.30;
+        if (cp.x < mx || cp.x > sz.x - mx || cp.y < my || cp.y > sz.y - my) {
+          lastPanMs = ts;
+          map.panTo([p.lat, p.lon], { animate: true, duration: 0.9, easeLinearity: 0.4 });
+        }
       }
       if (simHr < maxHr) requestAnimationFrame(frame);
       else if (follow && !userPanned) {
