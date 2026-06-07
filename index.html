@@ -3,6 +3,18 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Google Analytics (GA4). Skipped on local previews so dev traffic stays out of the stats. -->
+  <script>
+    if (location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+      var s = document.createElement('script');
+      s.async = true; s.src = 'https://www.googletagmanager.com/gtag/js?id=G-YDD6KW4C35';
+      document.head.appendChild(s);
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){ dataLayer.push(arguments); }
+      gtag('js', new Date());
+      gtag('config', 'G-YDD6KW4C35');
+    }
+  </script>
   <title>Seed the Storm — a tropical cyclone ACE game</title>
   <meta name="description" content="An educational tropical-cyclone game: pick the seed that spins up the most ACE, on real ERA5 data + LGEM intensity physics." />
   <meta name="theme-color" content="#0C2420" />
