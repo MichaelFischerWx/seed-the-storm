@@ -21,6 +21,16 @@
   // Beta drift: ~2 m/s toward ~320 deg (WNW) in the NH.
   var BETA_MS = 2.0, BETA_U = Math.sin(320 * DEG2RAD), BETA_V = Math.cos(320 * DEG2RAD);
 
+  // Deep-tropics poleward nudge. The pack's steering (0.75*850 + 0.25*200) is
+  // pure trade / upper-easterly flow in the deep tropics — westward and weakly
+  // EQUATORWARD — with none of the poleward steering real storms get from the
+  // mid-troposphere and the subtropical ridge's western flank. Without it, low-
+  // latitude storms run due west into South America instead of curving WNW. Add
+  // a small poleward push that is strongest near the equator and fades to zero
+  // by LAT_BETA_FADE, so recurving mid-latitude storms are untouched.
+  var POLE_MS = 1.6;            // m/s extra poleward at the equator
+  var LAT_BETA_FADE = 25;       // deg; nudge ramps linearly to 0 here
+
   // --- Intensity: Logistic Growth Equation Model (LGEM; DeMaria 2009, MWR) ---
   //   Over water:  dV/dt = kappa*V - beta*V*(V/Vmpi)^n            (Eq. 3)
   //   Over land :  dV/dt = -alpha*(V - Vb)   (Kaplan-DeMaria)     (Eq. 10)
@@ -55,7 +65,8 @@
     var u = ERA5.sampleTime(env.steeru, dayFloat, lat, lon);
     var v = ERA5.sampleTime(env.steerv, dayFloat, lat, lon);
     if (!isFinite(u) || !isFinite(v)) return null;
-    return { u: u + BETA_MS * BETA_U, v: v + BETA_MS * BETA_V };
+    var pole = POLE_MS * Math.max(0, (LAT_BETA_FADE - Math.abs(lat)) / LAT_BETA_FADE);
+    return { u: u + BETA_MS * BETA_U, v: v + BETA_MS * BETA_V + pole };
   }
 
   // Position derivative in deg/hr given a steering velocity (m/s).

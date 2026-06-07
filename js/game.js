@@ -48,6 +48,7 @@
   var ROUNDS = 6;
   var game = { round: 0, year: 0, total: 0, totalAce: 0, rows: [], mode: 'atl' };
   var animToken = 0;   // invalidates a superseded animation loop
+  var userPanned = false;   // set when the player drags/zooms → stop auto-following
   var sharedMode = false;   // true while viewing a shared storm/game from a link
   var nextRound = null;     // {basinKey, year, month} prefetched during a reveal → instant next deal
 
@@ -100,6 +101,9 @@
     }).addTo(map);
     seedLayer = L.layerGroup().addTo(map);
     trackLayer = L.layerGroup().addTo(map);
+    // A manual drag/zoom during playback stops the map auto-following the storm
+    // (don't fight the user). panTo(animate:false) fires neither of these events.
+    map.on('dragstart zoomstart', function () { userPanned = true; });
   }
 
   function seedIcon(i, selected) {
@@ -530,6 +534,12 @@
     trackLayer.clearLayers();
     results.forEach(function (r, k) { if (k !== i) drawTrackPolyline(k, null, true); });
 
+    // Follow the storm on small/narrow maps (mobile), where it otherwise drifts
+    // off-screen; on wide desktop maps the whole field is visible, so following
+    // would just slide the other seeds' tracks out of view. Yields to the user.
+    var follow = map.getSize().x < 640, lastPanMs = 0;
+    userPanned = false;
+
     var pts = results[i].track;
     var head = L.circleMarker([pts[0].lat, pts[0].lon],
       { radius: 6, color: '#fff', weight: 2, fillColor: colorForV(pts[0].v), fillOpacity: 1 }).addTo(trackLayer);
@@ -563,7 +573,16 @@
       if (shearLayer && p.hr - lastShearHr >= SHEAR_REBUILD_HR) {
         lastShearHr = p.hr; shearLayer.setUrl(shearUrlAt(env.startDayIdx + p.hr / 24));
       }
+      // Keep the storm centred (throttled, so the pan reads as smooth drift).
+      if (follow && !userPanned && ts - lastPanMs > 140) {
+        lastPanMs = ts; map.panTo([p.lat, p.lon], { animate: false });
+      }
       if (simHr < maxHr) requestAnimationFrame(frame);
+      else if (follow && !userPanned) {
+        // Pull back to the whole journey once it finishes playing.
+        var b = L.latLngBounds(pts.map(function (q) { return [q.lat, q.lon]; }));
+        map.fitBounds(b.pad(0.3), { animate: true, maxZoom: 6 });
+      }
     }
     requestAnimationFrame(frame);
   }
@@ -1302,6 +1321,7 @@
   function showSharedStorm(p) {
     var basin = BASINS[p.b] || BASINS.atl;
     sharedMode = true;
+    track('shared_open', { kind: 'storm', basin: basin.key });   // someone opened a shared-storm link
     game = { round: 0, total: 0, totalAce: 0, rows: [], mode: basin.key, objective: 'ace' };
     $('basin-name').textContent = basin.name + ' · ';
     $('round-label').textContent = 'Shared storm';
@@ -1346,6 +1366,7 @@
   // Render a shared game as a read-only recap, reusing the summary stage.
   function showSharedGame(p) {
     sharedMode = true;
+    track('shared_open', { kind: 'game', mode: p.mode || 'atl' });   // someone opened a shared-game link
     game = { round: 0, total: 0, totalAce: p.total || 0, rows: [], mode: p.mode || 'atl', objective: p.obj || 'ace' };
     var vmax = p.obj === 'vmax';
     $('score-badge').classList.add('hidden');

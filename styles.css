@@ -48,12 +48,19 @@ h1, h2 { font-family: var(--font); }
 input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; }
 svg.ic, .brand-mark, .btn-ic, .v-ic { display: inline-block; fill: none; }
 
-#app { display: flex; flex-direction: column; height: 100vh; }
+/* 100dvh tracks the DYNAMIC viewport so the bottom row (sticky "Next round")
+   isn't hidden behind a mobile browser's collapsing toolbar; 100vh is the
+   fallback for browsers without dvh. */
+#app { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
 
 /* ---- Topbar ---- */
 #topbar {
   display: flex; align-items: center; justify-content: space-between;
   gap: 16px; padding: 11px 20px; z-index: 600;
+  /* clear the camera notch / Dynamic Island (and landscape side insets) */
+  padding-top: max(11px, env(safe-area-inset-top));
+  padding-left: max(20px, env(safe-area-inset-left));
+  padding-right: max(20px, env(safe-area-inset-right));
   background: linear-gradient(180deg, #123524, #0C2420);
   border-bottom: 1px solid var(--line); box-shadow: var(--sh-1);
 }
@@ -428,7 +435,10 @@ svg.ic, .brand-mark, .btn-ic, .v-ic { display: inline-block; fill: none; }
 
 /* phones: condense the topbar so nothing wraps, and tighten map overlays */
 @media (max-width: 560px) {
-  #topbar { padding: 8px 12px; gap: 10px; }
+  #topbar { padding: 8px 12px; gap: 10px;
+    padding-top: max(8px, env(safe-area-inset-top));
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right)); }
   .brand { gap: 9px; }
   .brand-mark { width: 24px; height: 24px; }
   .brand-text h1 { font-size: 15px; white-space: nowrap; }
@@ -442,7 +452,7 @@ svg.ic, .brand-mark, .btn-ic, .v-ic { display: inline-block; fill: none; }
   .btn { padding: 8px 11px; }
   #deal-btn { font-size: 12.5px; }
   #panel { padding: 16px; max-height: 50vh; }
-  .result-actions { margin: 14px -16px -16px; padding: 12px 16px 14px; }
+  .result-actions { margin: 14px -16px -16px; padding: 12px 16px calc(14px + env(safe-area-inset-bottom, 0px)); }
   /* compact, low-profile colorbar so it covers as little of the short map as possible */
   .map-legend { width: 116px; left: 8px; bottom: 8px; padding: 6px 8px; opacity: .92; }
   .map-legend .ml-title { font-size: 9px; margin-bottom: 4px; }
