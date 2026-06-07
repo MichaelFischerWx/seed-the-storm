@@ -14,6 +14,7 @@ Usage:  python3 build_atlantic_pack.py [years]
 """
 import os, sys, gzip, json, urllib.request
 import numpy as np
+from scipy.ndimage import gaussian_filter1d   # conda install scipy / pip install scipy
 
 DAILY = 'https://storage.googleapis.com/tc-atlas-ir-cache/era5_daily_1deg'
 GC_MAN = 'https://storage.googleapis.com/gc-atlas-era5/tiles/manifest.json'
@@ -22,6 +23,36 @@ OUT = os.path.join(os.path.dirname(__file__), '..', 'data')
 NAN = 65535
 W850, W200 = 0.75, 0.25
 MONTHS = [6, 7, 8, 9, 10, 11, 12]          # Jun–Nov deals + Dec (Nov's span)
+
+# Environmental vortex removal. We low-pass the RAW level winds BEFORE deriving
+# shear and steering, so real TCs in the analysis don't leave a circulation for
+# game seeds to orbit or a shear footprint to shred them. This must happen on the
+# vector winds, NOT the scalar shear magnitude — |smooth(V200-V850)| !=
+# smooth(|V200-V850|); a vortex is a *blob* of large shear magnitude that blurring
+# can't cancel.
+#
+# Level-asymmetric on purpose:
+#   850 mb — the TC is a tight, strong cyclonic vortex (~300–500 km), well below
+#            synoptic scale and the dominant steering term (75%). Smooth it hard.
+#   200 mb — the TC signal is a broad, weak, largely DIVERGENT outflow anticyclone
+#            that overlaps in scale with the upper troughs / TUTT / jets we must
+#            keep. Scale-based smoothing here would kill troughs for little gain,
+#            so leave 200 raw (sigma 0). The residual outflow in the shear is broad
+#            and anticyclonic — acceptable. (If it ever matters, the right fix is
+#            removing the DIVERGENT component at 200 via Helmholtz, not smoothing.)
+# SIGMA is in grid cells (~1°/cell ≈ 111 km).
+SMOOTH_SIGMA_850 = 3.0
+SMOOTH_SIGMA_200 = 0.0
+
+
+def env_smooth(arr3d, sigma):
+    """Strip sub-synoptic vortices from each day's field (nd, 121, 360).
+    Longitude wraps (global); latitude is edge-clamped (no NH↔SH bleed).
+    sigma <= 0 returns the field unchanged."""
+    if sigma <= 0:
+        return arr3d
+    a = gaussian_filter1d(arr3d, sigma, axis=2, mode='wrap')      # longitude
+    return gaussian_filter1d(a,  sigma, axis=1, mode='nearest')   # latitude
 
 # Northern Hemisphere band: lat 60..0 (daily rows 0..60, sst rows 30..90),
 # ALL longitudes (cols 0..359). Covers every NH basin for future multi-basin work.
@@ -85,10 +116,15 @@ def main():
                 t = dman['%s/%d_%s' % (fld, y, mm)]
                 return dequant(fetch('%s/%s/%d_%s.bin.gz' % (DAILY, fld, y, mm)), t['vmin'], t['vmax'], shp)
 
+            # Vortex-remove the RAW level winds first, then derive ENVIRONMENTAL
+            # shear + steering from the smoothed winds (see env_smooth above).
+            # 850 is smoothed hard; 200 is left raw to preserve upper troughs.
+            u200, v200 = env_smooth(load('u200'), SMOOTH_SIGMA_200), env_smooth(load('v200'), SMOOTH_SIGMA_200)
+            u850, v850 = env_smooth(load('u850'), SMOOTH_SIGMA_850), env_smooth(load('v850'), SMOOTH_SIGMA_850)
             out = {
-                'shear': load('shear')[:, LAT_D, LON],
-                'steeru': (W850 * load('u850') + W200 * load('u200'))[:, LAT_D, LON],
-                'steerv': (W850 * load('v850') + W200 * load('v200'))[:, LAT_D, LON],
+                'shear': np.hypot(u200 - u850, v200 - v850)[:, LAT_D, LON],
+                'steeru': (W850 * u850 + W200 * u200)[:, LAT_D, LON],
+                'steerv': (W850 * v850 + W200 * v200)[:, LAT_D, LON],
             }
             for fld, arr in out.items():
                 buf, vmin, vmax = encode(np.ascontiguousarray(arr))

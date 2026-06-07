@@ -20,6 +20,11 @@
   // window.SEEDSTORM_DATA.base if you ever host the pack elsewhere.
   var CFG = (typeof window !== 'undefined' && window.SEEDSTORM_DATA) || {};
   var BASE = CFG.base || 'data';
+  // Cache-bust the data pack on each regeneration — tiles + manifest are fetched
+  // by plain path, so a content change must bump this or returning visitors can
+  // mix a cached old manifest with new tiles (vmin/vmax mismatch → garbage decode).
+  // v2 = environmental (850-mb vortex-removed) shear/steering pack.
+  var DV = '?v=' + (CFG.version || '2');
 
   var NAN = 0xFFFF;
   var _manifest = null;     // Promise<manifest>
@@ -29,7 +34,7 @@
 
   function loadManifest() {
     if (_manifest) return _manifest;
-    _manifest = fetch(BASE + '/manifest.json').then(function (r) {
+    _manifest = fetch(BASE + '/manifest.json' + DV).then(function (r) {
       if (!r.ok) throw new Error('manifest HTTP ' + r.status);
       return r.json();
     });
@@ -59,7 +64,7 @@
       var key = field + '/' + year + '_' + pad2(month);
       var t = man.daily[key];
       if (!t) throw new Error('no daily tile ' + key);
-      return fetchDecode(BASE + '/' + key + '.bin.gz', t.vmin, t.vmax).then(function (values) {
+      return fetchDecode(BASE + '/' + key + '.bin.gz' + DV, t.vmin, t.vmax).then(function (values) {
         return { field: field, values: values, nDays: t.nDays, grid: man.grid };
       });
     });
@@ -87,7 +92,7 @@
   function loadSST(month) {
     return loadManifest().then(function (man) {
       var t = man.sst[pad2(month)];
-      return fetchDecode(BASE + '/sst/' + pad2(month) + '.bin.gz', t.vmin, t.vmax).then(function (values) {
+      return fetchDecode(BASE + '/sst/' + pad2(month) + '.bin.gz' + DV, t.vmin, t.vmax).then(function (values) {
         return { values: values, grid: man.grid };
       });
     });
