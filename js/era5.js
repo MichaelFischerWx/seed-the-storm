@@ -34,27 +34,45 @@
 
   function pad2(n) { return (n < 10 ? '0' : '') + n; }
 
+  // GitHub Pages (Fastly) returns transient 503s — during a deploy, an edge
+  // hiccup, or rate-limiting — and a single failed tile would otherwise sink a
+  // whole round. Retry transient failures (network errors, 5xx, 429) with
+  // exponential backoff; fail fast on 4xx (a genuinely missing file). Returns
+  // the ok Response.
+  function _retriable(status) { return !status || status >= 500 || status === 429; }
+  function fetchOk(url, tries, delay) {
+    tries = tries || 4; delay = delay || 500;
+    return fetch(url).then(function (r) {
+      if (r.ok) return r;
+      var e = new Error('HTTP ' + r.status + ' for ' + url); e.status = r.status; throw e;
+    }).catch(function (e) {
+      if (tries <= 1 || !_retriable(e && e.status)) throw e;
+      return new Promise(function (res) { setTimeout(res, delay); })
+        .then(function () { return fetchOk(url, tries - 1, delay * 2); });
+    });
+  }
+
   function loadManifest() {
     if (_manifest) return _manifest;
-    _manifest = fetch(BASE + '/manifest.json' + DV).then(function (r) {
-      if (!r.ok) throw new Error('manifest HTTP ' + r.status);
-      return r.json();
-    });
+    _manifest = fetchOk(BASE + '/manifest.json' + DV).then(function (r) { return r.json(); });
+    _manifest.catch(function () { _manifest = null; });   // never cache a transient failure
     return _manifest;
   }
 
-  // gzip + uint16 dequantize.
+  // gzip + uint16 dequantize (with transient-failure retry; cache is never
+  // poisoned by a failure, so a later request — e.g. the real deal after a
+  // failed prefetch — can fetch fresh).
   function fetchDecode(url, vmin, vmax) {
     if (_cache[url]) return _cache[url];
     var range = (vmax - vmin) / 65534; // 65534 = 65535 - 1
-    var p = fetch(url).then(function (r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status + ' for ' + url);
+    var p = fetchOk(url).then(function (r) {
       return new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
     }).then(function (buf) {
       var u16 = new Uint16Array(buf), out = new Float32Array(u16.length);
       for (var i = 0; i < u16.length; i++) out[i] = u16[i] === NAN ? NaN : vmin + u16[i] * range;
       return out;
     });
+    p.catch(function () { if (_cache[url] === p) delete _cache[url]; });
     _cache[url] = p;
     return p;
   }
@@ -130,9 +148,9 @@
   var _climo = null;
   function loadClimo() {
     if (_climo) return _climo;
-    _climo = fetch(BASE + '/climo.json' + DV)
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .catch(function () { return null; });
+    _climo = fetchOk(BASE + '/climo.json' + DV)
+      .then(function (r) { return r.json(); })
+      .catch(function () { _climo = null; return null; });   // optional; retry next time if it failed
     return _climo;
   }
 
