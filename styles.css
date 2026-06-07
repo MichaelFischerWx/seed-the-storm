@@ -257,6 +257,27 @@ svg.ic, .brand-mark, .btn-ic, .v-ic { display: inline-block; fill: none; }
   padding: 12px 13px; margin-top: 14px; }
 .teach b { color: var(--ink); font-weight: 600; }
 
+/* ---- post-reveal head-to-head comparison ---- */
+.compare { margin-top: 14px; }
+.cmp-head { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent-2); margin-bottom: 6px; }
+.cmp-line { font-size: 12.8px; line-height: 1.55; color: var(--ink-dim); margin: 0 0 10px; }
+.cmp-line b { color: var(--ink); font-weight: 600; }
+.cmp-table { width: 100%; border-collapse: collapse; font-size: 12.5px;
+  background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: var(--r); overflow: hidden; }
+.cmp-table th, .cmp-table td { padding: 7px 10px; text-align: right; }
+.cmp-table thead th { font-weight: 700; color: var(--ink); border-bottom: 1px solid var(--line-soft);
+  white-space: nowrap; }
+.cmp-table th:first-child, .cmp-table td:first-child { text-align: left; color: var(--ink-dim); font-weight: 500; }
+.cmp-table tbody tr + tr td { border-top: 1px solid var(--line-soft); }
+.cmp-table td { font-variant-numeric: tabular-nums; color: var(--ink); }
+.cmp-table .seed-dot { width: 9px; height: 9px; vertical-align: 0; margin-right: 5px; }
+.cmp-tag { display: inline-block; font-size: 9.5px; font-weight: 700; letter-spacing: .04em;
+  text-transform: uppercase; padding: 1px 5px; border-radius: 999px; margin-left: 4px;
+  color: var(--accent-ink); background: var(--accent-2); }
+.cmp-tag.your { color: var(--ink); background: var(--surface-3); border: 1px solid var(--line-bright); }
+.cmp-note { font-size: 10.5px; color: var(--ink-faint); margin: 6px 2px 0; }
+
 .result-actions { display: flex; gap: 10px; margin-top: 16px; }
 .result-actions .btn { flex: 1; }
 .result-actions #next-btn { flex: 2; }

@@ -598,6 +598,7 @@
       });
 
     $('teach').innerHTML = teachText(chosen, best, chosenIdx, bi);
+    renderCompare();
     drawIntensityChart();
   }
 
@@ -643,6 +644,87 @@
     return '<b>Your seed ' + SEED_LABELS[ci] + '</b> ' + describe(chosen) +
       '. Meanwhile <b>seed ' + SEED_LABELS[bi] + '</b> ' + describe(best) +
       ' — that’s where the environment was kindest.';
+  }
+
+  // ---- post-reveal head-to-head ----
+  // Lay the chosen seed's environment next to the winner's (or, if you won, the
+  // runner-up's). Every number is a simple mean/sum over the storm's FULL life
+  // cycle — purely descriptive, NOT a causal attribution. We show the two side
+  // by side and let the player draw the lesson.
+  function trackDiag(r) {
+    var pts = r.track, n = pts.length, shSum = 0, mpiSum = 0, hoursWater = 0, lfHr = null;
+    for (var i = 0; i < n; i++) {
+      shSum += pts[i].shear; mpiSum += pts[i].mpi;                 // shear in m/s, mpi in kt
+      if (i > 0 && !pts[i - 1].land) hoursWater += pts[i].hr - pts[i - 1].hr;
+      if (lfHr === null && pts[i].land) lfHr = pts[i].hr;
+    }
+    return { n: n, daysWater: hoursWater / 24, meanShearKt: (shSum / Math.max(1, n)) * 1.94384,
+             meanMpiKt: mpiSum / Math.max(1, n), landfallHr: lfHr };
+  }
+  function runnerUpIdx(winner) {
+    var ru = -1;
+    for (var i = 0; i < results.length; i++) {
+      if (i === winner) continue;
+      if (ru < 0 || objVal(results[i]) > objVal(results[ru])) ru = i;
+    }
+    return ru;
+  }
+  function landfallStr(hr) { return hr === null ? 'none' : 'day ' + (hr / 24).toFixed(1); }
+
+  // Neutral narration of how the higher-scoring seed's environment differed from
+  // the lower one's — lists only meaningful gaps, never says "because".
+  function compareSentence(hiLabel, loLabel, dh, dl) {
+    var parts = [];
+    var dW = dh.daysWater - dl.daysWater;
+    if (Math.abs(dW) >= 0.5) parts.push('spent ' + Math.abs(dW).toFixed(1) + (dW > 0 ? ' more' : ' fewer') + ' days over water');
+    var dS = dh.meanShearKt - dl.meanShearKt;
+    if (Math.abs(dS) >= 2) parts.push('saw ' + Math.round(Math.abs(dS)) + ' kt ' + (dS < 0 ? 'less' : 'more') + ' shear on average');
+    var dM = dh.meanMpiKt - dl.meanMpiKt;
+    if (Math.abs(dM) >= 5) parts.push('sat under a ' + Math.round(Math.abs(dM)) + '-kt ' + (dM > 0 ? 'higher' : 'lower') + ' ocean-potential ceiling');
+    if (dh.landfallHr === null && dl.landfallHr !== null) parts.push('stayed offshore, while Seed ' + loLabel + ' made landfall on ' + landfallStr(dl.landfallHr));
+    else if (dh.landfallHr !== null && dl.landfallHr === null) parts.push('made landfall on ' + landfallStr(dh.landfallHr) + ', while Seed ' + loLabel + ' stayed offshore');
+    else if (dh.landfallHr !== null && dl.landfallHr !== null) {
+      var dd = (dh.landfallHr - dl.landfallHr) / 24;
+      if (Math.abs(dd) >= 0.5) parts.push((dd > 0 ? 'held off landfall ' : 'made landfall ') + Math.abs(dd).toFixed(1) + ' days ' + (dd > 0 ? 'longer' : 'sooner'));
+    }
+    if (!parts.length) return 'Seeds ' + hiLabel + ' and ' + loLabel + ' saw nearly identical environments — it was a close call.';
+    var joined = parts.length === 1 ? parts[0] : parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1];
+    return 'Seed ' + hiLabel + ' ' + joined + '.';
+  }
+
+  function renderCompare() {
+    var el = $('compare'); if (!el) return;
+    var bi = bestIdx(), ci = chosenIdx, hi, lo;     // hi = higher-scoring of the pair, lo = lower
+    if (ci === bi) { var ru = runnerUpIdx(bi); if (ru < 0) { el.classList.add('hidden'); el.innerHTML = ''; return; } hi = ci; lo = ru; }
+    else { hi = bi; lo = ci; }
+    var dHi = trackDiag(results[hi]), dLo = trackDiag(results[lo]);
+    // A seed that left the basin / domain at genesis has no sampled environment
+    // (empty track) — the side-by-side numbers would be a misleading row of
+    // zeros, and the teach text already narrates that case. Skip the panel.
+    if (dHi.n < 2 || dLo.n < 2) { el.classList.add('hidden'); el.innerHTML = ''; return; }
+    var yourIdx = ci, otherIdx = (ci === bi) ? lo : bi;          // player's seed always in the first column
+    var dYour = (yourIdx === hi) ? dHi : dLo, dOther = (otherIdx === hi) ? dHi : dLo;
+    var tag = function (idx) {
+      var t = '';
+      if (idx === bi) t += ' <span class="cmp-tag">strongest</span>';
+      if (idx === ci) t += ' <span class="cmp-tag your">your pick</span>';
+      return t;
+    };
+    var col = function (idx) { return '<span class="seed-dot" style="background:' + SEED_COLORS[idx] + '"></span>Seed ' + SEED_LABELS[idx]; };
+    var row = function (label, a, b) { return '<tr><td>' + label + '</td><td>' + a + '</td><td>' + b + '</td></tr>'; };
+    el.innerHTML =
+      '<div class="cmp-head">How they compared</div>' +
+      '<p class="cmp-line">' + compareSentence(SEED_LABELS[hi], SEED_LABELS[lo], dHi, dLo) + '</p>' +
+      '<table class="cmp-table"><thead><tr><th></th>' +
+        '<th>' + col(yourIdx) + tag(yourIdx) + '</th>' +
+        '<th>' + col(otherIdx) + tag(otherIdx) + '</th></tr></thead><tbody>' +
+        row('Days over water', dYour.daysWater.toFixed(1), dOther.daysWater.toFixed(1)) +
+        row('Mean shear', Math.round(dYour.meanShearKt) + ' kt', Math.round(dOther.meanShearKt) + ' kt') +
+        row('Ocean potential', Math.round(dYour.meanMpiKt) + ' kt', Math.round(dOther.meanMpiKt) + ' kt') +
+        row('First landfall', landfallStr(dYour.landfallHr), landfallStr(dOther.landfallHr)) +
+      '</tbody></table>' +
+      '<p class="cmp-note">Averages over each storm’s full life cycle.</p>';
+    el.classList.remove('hidden');
   }
 
   // Redraw the inset chart (and the expanded one if open).
@@ -1169,6 +1251,7 @@
     $('score-line').innerHTML = 'Peaked at <b>' + Math.round(r.peakV) + ' kt</b> (' +
       catLabel(r.peakCat) + ') &nbsp;·&nbsp; <b>' + r.ace.toFixed(1) + ' ACE</b>';
     $('result-list').innerHTML = '';
+    var cmp = $('compare'); if (cmp) { cmp.classList.add('hidden'); cmp.innerHTML = ''; }   // no head-to-head for a lone storm
     $('teach').innerHTML = 'This storm ' + describe(r) + '.';
     $('share-storm-btn').classList.add('hidden');     // (re-sharing handled from a fresh game)
     $('next-btn').textContent = 'Play Seed the Storm →';
