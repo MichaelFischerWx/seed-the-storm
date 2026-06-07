@@ -155,8 +155,12 @@
     if (game.mode === 'nh') { basin = BASINS[pick(BASIN_KEYS)]; month = pick(basin.months); }
     else { basin = BASINS[game.mode]; month = basin.months[game.round]; }   // 0-based index of round+1
     var year = pick(YEARS);
-    nextRound = { basinKey: basin.key, month: month, year: year };
-    loadEnv(basin.key, year, month, 0).catch(function () {});                // fire-and-forget cache warm
+    // Keep the assembled env (not just the warm tile cache): dealRound reuses it
+    // verbatim, so the 2-month span concatenation happens ONCE per round here,
+    // not again at deal time. Only startDayIdx differs, and that's a scalar.
+    var envP = loadEnv(basin.key, year, month, 0);
+    envP.catch(function () {});                                             // silence unhandled-rejection
+    nextRound = { basinKey: basin.key, month: month, year: year, envP: envP };
   }
 
   function dealRound() {
@@ -166,9 +170,10 @@
     // 6 months in order; Random-NH mode draws a random basin + month each round.
     // If the previous reveal already prefetched this round, reuse it verbatim so
     // its fields are served warm from the fetch cache (no deal lag).
-    var basin, month, year;
+    var basin, month, year, prefetchedEnvP = null;
     if (nextRound) {
       basin = BASINS[nextRound.basinKey]; month = nextRound.month; year = nextRound.year;
+      prefetchedEnvP = nextRound.envP;   // reuse the env assembled during the last reveal
       nextRound = null;
     } else if (game.mode === 'nh') {
       basin = BASINS[pick(BASIN_KEYS)]; month = pick(basin.months); year = pick(YEARS);
@@ -187,10 +192,17 @@
       elDealDate.textContent = MONTH_NAMES[month] + ' ' + day + ', ' + year;
       if (basin.view) map.setView(basin.view.center, basin.view.zoom, { animate: false });
 
-      // Load this month + the next so a storm can be integrated across the
-      // month boundary until it dissipates, on a contiguous time axis.
-      return loadEnv(basin.key, year, month, startDayIdx).then(function (e) {
+      // Reuse the env assembled during the prefetch if we have it (a failed
+      // prefetch falls back to a fresh, retrying load); otherwise load now.
+      // Either way the storm integrates across the month boundary on a
+      // contiguous time axis.
+      var envP = prefetchedEnvP
+        ? prefetchedEnvP.catch(function () { return loadEnv(basin.key, year, month, startDayIdx); })
+        : loadEnv(basin.key, year, month, startDayIdx);
+      return envP.then(function (e) {
         env = e;
+        env.startDayIdx = startDayIdx;            // prefetch used day 0; set this round's real start day
+        env.excludeEPac = !!basin.excludeEPac;
         placeSeeds();
         renderFlow();
         renderShear();
