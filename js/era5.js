@@ -31,6 +31,23 @@
   var NAN = 0xFFFF;
   var _manifest = null;     // Promise<manifest>
   var _cache = {};          // url -> Promise<Float32Array>
+  // LRU bound on decoded tiles. Each tile is multi-MB (a month-field is
+  // ~2.6 MB; the land mask ~8.6 MB), and an unbounded cache grew to >100 MB
+  // over a full game — enough for a mobile browser to discard + reload the tab
+  // ("the game randomly starts over"). A round needs ~9 tiles + the prefetched
+  // next round ~8, so 20 keeps everything live while capping peak memory.
+  // Safe to evict: assembled spans are copies, and live env arrays are held by
+  // the env object, so dropping a cache entry never frees in-use data — it just
+  // means a later request re-fetches.
+  var _order = [];          // urls, least-recent first
+  var CACHE_CAP = 20;
+  function _touch(url) {
+    var i = _order.indexOf(url);
+    if (i >= 0) _order.splice(i, 1);
+    _order.push(url);
+    while (_order.length > CACHE_CAP) { var old = _order.shift(); if (old !== url) delete _cache[old]; }
+  }
+  function _drop(url) { delete _cache[url]; var i = _order.indexOf(url); if (i >= 0) _order.splice(i, 1); }
 
   function pad2(n) { return (n < 10 ? '0' : '') + n; }
 
@@ -63,7 +80,7 @@
   // poisoned by a failure, so a later request — e.g. the real deal after a
   // failed prefetch — can fetch fresh).
   function fetchDecode(url, vmin, vmax) {
-    if (_cache[url]) return _cache[url];
+    if (_cache[url]) { _touch(url); return _cache[url]; }
     var range = (vmax - vmin) / 65534; // 65534 = 65535 - 1
     var p = fetchOk(url).then(function (r) {
       return new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
@@ -72,8 +89,9 @@
       for (var i = 0; i < u16.length; i++) out[i] = u16[i] === NAN ? NaN : vmin + u16[i] * range;
       return out;
     });
-    p.catch(function () { if (_cache[url] === p) delete _cache[url]; });
+    p.catch(function () { if (_cache[url] === p) _drop(url); });   // don't cache a failure
     _cache[url] = p;
+    _touch(url);                                                   // LRU: insert + evict oldest
     return p;
   }
 
