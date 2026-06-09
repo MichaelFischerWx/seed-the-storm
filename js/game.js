@@ -568,6 +568,9 @@
   var HRS_PER_FRAME = 0.7;   // ~1 day per ~1.1 s at 30 fps
   var FRAME_MS = 33;
   var SHEAR_REBUILD_HR = 12; // re-shade shear every 12 sim-hours
+  var animHook = null;       // optional per-frame callback(hr, v) — drives the tutorial captions
+  var tutorialActive = false;
+  var TUTORIAL_HRS_PER_FRAME = 0.32;   // slower so the demo's captions are readable (~15 s)
 
   function animateTrack(i) {
     var token = ++animToken;                 // supersede any running animation
@@ -595,7 +598,7 @@
       if (token !== animToken) return;       // a newer animation took over
       if (ts - lastMs < FRAME_MS) { requestAnimationFrame(frame); return; }
       lastMs = ts;
-      simHr = Math.min(maxHr, simHr + HRS_PER_FRAME);
+      simHr = Math.min(maxHr, simHr + (tutorialActive ? TUTORIAL_HRS_PER_FRAME : HRS_PER_FRAME));
       var upto = Math.min(pts.length, Math.floor(simHr) + 1);
       for (var s = drawn; s < upto; s++) {
         L.polyline([[pts[s - 1].lat, pts[s - 1].lon], [pts[s].lat, pts[s].lon]],
@@ -610,6 +613,7 @@
       // Evolve the steering flow + shaded shear field + clock + chart cursor.
       updateClock(p.hr);
       setChartCursor(p.hr);
+      if (animHook) animHook(p.hr, p.v);   // tutorial caption driver
       if (flowLayer && map.hasLayer(flowLayer)) flowLayer.setTime(env.startDayIdx + p.hr / 24);
       if (shearLayer && p.hr - lastShearHr >= SHEAR_REBUILD_HR) {
         lastShearHr = p.hr; shearLayer.setUrl(shearUrlAt(env.startDayIdx + p.hr / 24));
@@ -1112,11 +1116,78 @@
   function goHome() {
     sharedMode = false;
     nextRound = null;
+    if (tutorialActive) { tutorialActive = false; animHook = null; $('tutorial').classList.add('hidden'); }
     restoreSharedUI();
     resetRound();
     $('score-badge').classList.add('hidden');
     showStage('intro');
     startAttract();
+  }
+
+  // ---- first-load tutorial -------------------------------------------------
+  // A scripted, skippable demo of one real storm: it intensifies under warm
+  // water + low shear, then tears apart in a wall of high shear — doubling as a
+  // live tour of the Ocean-potential and Wind-shear overlays. Hand-picked,
+  // deterministic scenario (verified to peak Cat 4 then dissipate via shear).
+  var TUT_SCN = { b: 'atl', y: 2005, m: 9, d: 6, la: 24, lo: -66 };
+  var TUT_BEATS = [
+    { hr: 0,   field: 'mpi',   html: 'Meet a baby storm over <b>bath-warm water</b>. The <b>Ocean potential</b> layer (warmer = more fuel) shows how strong it could get here.' },
+    { hr: 30,  field: 'shear', html: 'It sits under <b>very low wind shear</b> — the calm <b>blue</b> on the <b>Wind shear</b> layer. Low shear lets a storm organise…' },
+    { hr: 84,  field: 'shear', html: '…and it erupts into a <b>Category 4 hurricane</b>. Warm water + low shear is the whole recipe.' },
+    { hr: 116, field: 'shear', html: 'Then it curves north into a wall of <b>strong shear</b> (<b>red</b>) — which tilts the storm and rips it apart.' },
+    { hr: 150, field: 'shear', html: 'Shear wins; it fizzles out. <b>Your turn:</b> pick the seed that finds warm water and stays under low shear.' },
+  ];
+  var tutBeat = -1;
+
+  function tutSetField(field) {
+    $('tog-mpi').checked = (field === 'mpi');
+    $('tog-shear').checked = (field === 'shear');
+    renderMpi(); renderShear();
+  }
+  function tutShowBeat(i) {
+    if (i <= tutBeat || i >= TUT_BEATS.length) return;
+    tutBeat = i;
+    var b = TUT_BEATS[i];
+    tutSetField(b.field);
+    $('tut-caption').innerHTML = b.html;
+    $('tut-progress').textContent = (i + 1) + ' / ' + TUT_BEATS.length;
+    if (i === TUT_BEATS.length - 1) $('tut-play').classList.remove('hidden');   // final beat → offer Play
+  }
+
+  function runTutorial() {
+    tutorialActive = true; tutBeat = -1;
+    var basin = BASINS[TUT_SCN.b];
+    game = { round: 0, total: 0, totalAce: 0, rows: [], mode: basin.key, objective: 'ace' };
+    Object.keys(stages).forEach(function (k) { stages[k].classList.add('hidden'); });
+    $('score-badge').classList.add('hidden');
+    $('basin-name').textContent = ''; $('round-label').textContent = 'How it works';
+    var clk = $('map-clock'); if (clk) clk.classList.remove('hidden');
+    $('tut-play').classList.add('hidden');
+    $('tut-caption').innerHTML = 'Loading a sample storm…';
+    $('tut-progress').textContent = '';
+    $('tutorial').classList.remove('hidden');
+    loadEnv(basin.key, TUT_SCN.y, TUT_SCN.m, TUT_SCN.d - 1).then(function (e) {
+      if (!tutorialActive) return;                 // skipped while loading
+      env = e; env.startDayIdx = TUT_SCN.d - 1; env.excludeEPac = !!basin.excludeEPac;
+      seeds = [{ lat: TUT_SCN.la, lon: TUT_SCN.lo }];
+      chosenIdx = 0; viewIdx = 0;
+      results = Model.runSeeds(env, seeds);
+      if (basin.view) map.setView(basin.view.center, basin.view.zoom, { animate: false });
+      $('tog-flow').checked = true; renderFlow();
+      dealDate = { year: TUT_SCN.y, month: TUT_SCN.m, day: TUT_SCN.d, basin: basin.key };
+      animHook = function (hr) {
+        for (var k = TUT_BEATS.length - 1; k >= 0; k--) { if (hr >= TUT_BEATS[k].hr) { tutShowBeat(k); break; } }
+      };
+      tutShowBeat(0);
+      animateTrack(0);
+    }).catch(function (err) { console.error(err); endTutorial(); });
+  }
+
+  function endTutorial() {
+    tutorialActive = false; animHook = null; animToken++;
+    try { window.localStorage.setItem('seedstorm_tutorial_seen', '1'); } catch (e) {}
+    $('tutorial').classList.add('hidden');
+    goHome();
   }
 
   // Undo any DOM tweaks made by the shared-view renderers so normal play looks right.
@@ -1478,6 +1549,10 @@
     $('again-btn').addEventListener('click', function () { if (sharedMode) goHome(); else startGame(); });
     $('lb-submit-btn').addEventListener('click', submitScore);
     $('lb-name').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); submitScore(); } });
+    // tutorial controls + the intro "How it works" replay link
+    $('tut-skip').addEventListener('click', endTutorial);
+    $('tut-play').addEventListener('click', endTutorial);
+    $('how-it-works').addEventListener('click', function (e) { e.preventDefault(); runTutorial(); });
     // basin mode picker (intro)
     [].forEach.call(document.querySelectorAll('.mode-opt'), function (b) {
       b.addEventListener('click', function () {
@@ -1514,9 +1589,15 @@
       if (map) map.invalidateSize({ animate: false });   // keep the map filling its box on rotate/resize
       if (results && chosenIdx >= 0) drawIntensityChart();
     });
-    // A #share= link opens straight into the shared storm/game; otherwise the
-    // normal intro with the live sample-environment preview behind it.
-    if (!readShare()) { showStage('intro'); startAttract(); }
+    // A #share= link opens straight into the shared storm/game. Otherwise:
+    // first-ever visit → the scripted tutorial; returning visitor → the normal
+    // intro with the live sample-environment preview behind it.
+    if (!readShare()) {
+      var seenTut = false;
+      try { seenTut = !!window.localStorage.getItem('seedstorm_tutorial_seen'); } catch (e) {}
+      if (seenTut) { showStage('intro'); startAttract(); }
+      else runTutorial();
+    }
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

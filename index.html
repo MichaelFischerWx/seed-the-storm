@@ -42,7 +42,7 @@
     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
     crossorigin=""
   />
-  <link rel="stylesheet" href="styles.css?v=28" />
+  <link rel="stylesheet" href="styles.css?v=29" />
 </head>
 <body>
   <!-- icon sprite (stroke = currentColor) -->
@@ -108,6 +108,16 @@
              legend over the panel instead of the map). -->
         <div id="map-clock" class="map-clock hidden"></div>
         <div id="map-legend" class="map-legend hidden"></div>
+        <!-- first-load scripted tutorial (caption + controls overlay the map) -->
+        <div id="tutorial" class="tutorial hidden">
+          <div id="tut-caption" class="tut-caption"></div>
+          <div class="tut-bar">
+            <span id="tut-progress" class="tut-progress"></span>
+            <span class="tut-spacer"></span>
+            <button id="tut-skip" class="btn tut-btn">Skip</button>
+            <button id="tut-play" class="btn btn-primary tut-btn hidden">Play →</button>
+          </div>
+        </div>
       </div>
 
       <aside id="panel">
@@ -132,7 +142,8 @@
               against the best possible pick.</li>
           </ol>
           <p class="hint">Warm water + low shear + a long track over open ocean = big ACE.
-            Land and shear pull storms apart.</p>
+            Land and shear pull storms apart.
+            <a href="#" id="how-it-works" class="how-link">▶ Watch how it works</a></p>
           <div class="mode-pick">
             <span class="mode-label">Basin</span>
             <div id="mode-grid" class="mode-grid" role="group" aria-label="Choose a basin">
@@ -271,11 +282,11 @@
     };
   </script>
   <!-- ?v=N busts browser/Pages cache on each deploy — bump N when JS/CSS change. -->
-  <script src="js/era5.js?v=28"></script>
-  <script src="js/mpi.js?v=28"></script>
-  <script src="js/model.js?v=28"></script>
-  <script src="js/particles.js?v=28"></script>
-  <script src="js/leaderboard.js?v=28"></script>
-  <script src="js/game.js?v=28"></script>
+  <script src="js/era5.js?v=29"></script>
+  <script src="js/mpi.js?v=29"></script>
+  <script src="js/model.js?v=29"></script>
+  <script src="js/particles.js?v=29"></script>
+  <script src="js/leaderboard.js?v=29"></script>
+  <script src="js/game.js?v=29"></script>
 </body>
 </html>
