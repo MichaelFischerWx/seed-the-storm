@@ -1135,7 +1135,7 @@
   var TUT_BEATS = [
     { hr: 0,   field: 'mpi',   html: 'A weak disturbance (~35 kt) sits over a deep warm pool. Sea-surface temperature sets the <b>maximum potential intensity (MPI)</b> — the ceiling on how strong a storm can get. The highlighted <b>Ocean&nbsp;potential</b> layer maps it; here it’s very high.' },
     { hr: 36,  field: 'shear', html: '<b>Vertical wind shear is weak</b> — the calm blue on the highlighted <b>Wind&nbsp;shear</b> layer. With little shear the vortex stays vertically stacked and convection wraps the core, so it intensifies rapidly.' },
-    { hr: 88,  field: 'shear', html: 'Over warm water and low shear it reaches <b>Category&nbsp;4</b>, climbing toward its potential intensity. High MPI + low shear is the classic rapid-intensification setup.' },
+    { hr: 88,  field: 'shear', html: 'Over warm water and low shear it <b>rapidly intensifies into a major hurricane</b>, climbing toward its potential intensity. High MPI + low shear is the classic rapid-intensification recipe.' },
     { hr: 116, field: 'shear', html: 'Recurving poleward, it runs into <b>strong deep-layer shear</b> (red). Shear tilts and <b>ventilates</b> the vortex — fluxing dry, low-entropy air into the core — so it weakens.' },
     { hr: 150, field: 'shear', html: 'Shear and cooler water win; it drops below hurricane strength. <b>Your goal:</b> seed the storm where MPI is high and vertical shear stays low.' },
   ];
