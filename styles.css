@@ -446,6 +446,22 @@ svg.ic, .brand-mark, .btn-ic, .v-ic { display: inline-block; fill: none; }
 .leaflet-container { background: #061612; font: inherit; }
 .track-tip { font-size: 12px; }
 
+/* animated storm head: a glowing swirl that spins faster (--spin) and scales
+   up as the storm intensifies; colour = Saffir–Simpson category */
+.storm-head { width: 44px; height: 44px; pointer-events: none;
+  display: flex; align-items: center; justify-content: center;
+  transition: transform .6s ease, color .5s linear; will-change: transform; }
+.sh-swirl { width: 100%; height: 100%; overflow: visible; color: inherit;
+  filter: drop-shadow(0 0 7px currentColor);
+  animation: shspin var(--spin, 3s) linear infinite; }
+@keyframes shspin { to { transform: rotate(-360deg); } }   /* counterclockwise (NH) */
+
+/* expanding ring when the storm jumps a category */
+.cat-pulse { display: block; width: 12px; height: 12px; border-radius: 50%;
+  border: 2px solid currentColor; box-shadow: 0 0 10px currentColor;
+  animation: catpulse .9s ease-out forwards; }
+@keyframes catpulse { from { transform: scale(.6); opacity: .95; } to { transform: scale(7); opacity: 0; } }
+
 /* attribution: a small translucent dark pill, not an opaque white banner */
 .leaflet-control-attribution {
   background: rgba(8,28,23,.55) !important; color: var(--ink-faint) !important;

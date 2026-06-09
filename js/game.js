@@ -359,13 +359,9 @@
   }
 
   // ---- shaded environment fields (global, drawn BELOW the flow, nullschool style) ----
-  // Both shear and MPI are smooth filled rasters covering the data extent; only
-  // one shows at a time. Coastlines are drawn on top so land stays legible.
-  var FIELD_BBOX = { n: 60, s: 0, w: -180, e: 180 };  // NH-band pack extent (0–60N, all lon)
-  var D2R = Math.PI / 180;
-  function mercY(lat) { return Math.log(Math.tan(Math.PI / 4 + lat * D2R / 2)); }
-  function latOfMercY(y) { return (2 * Math.atan(Math.exp(y)) - Math.PI / 2) / D2R; }
-
+  // Both shear and MPI are smooth filled FieldLayers (js/fields.js) sampled at
+  // viewport resolution — crisp on retina phones; only one shows at a time.
+  // Coastlines are drawn on top so land stays legible.
   function fieldPane() {
     if (!map.getPane('fieldPane')) {
       var p = map.createPane('fieldPane');
@@ -374,28 +370,26 @@
     return 'fieldPane';
   }
 
-  // Build a Mercator-warped shaded raster so it lands geographically correct on
-  // the Web-Mercator map (rows linear in mercator-y; L.imageOverlay stretches it
-  // linearly in projected space). sample(lat,lon)->value; color(value)->[r,g,b,a].
-  function shadeFieldUrl(sample, color) {
-    var b = FIELD_BBOX, W = 360;
-    var yN = mercY(b.n), yS = mercY(b.s);
-    var H = Math.round(W * (yN - yS) / ((b.e - b.w) * D2R));   // keep ~square pixels
-    var cv = document.createElement('canvas'); cv.width = W; cv.height = H;
-    var ctx = cv.getContext('2d'), img = ctx.createImageData(W, H);
-    for (var j = 0; j < H; j++) {
-      var lat = latOfMercY(yN + (yS - yN) * j / (H - 1));
-      for (var i = 0; i < W; i++) {
-        var lon = b.w + (b.e - b.w) * i / (W - 1);
-        var c = color(sample(lat, lon));
-        var o = (j * W + i) * 4;
-        img.data[o] = c[0]; img.data[o + 1] = c[1]; img.data[o + 2] = c[2]; img.data[o + 3] = c[3];
-      }
-    }
-    ctx.putImageData(img, 0, 0);
-    return cv.toDataURL();
+  // Field samplers read the module-level `env` (swapped each round), so the
+  // layers persist across rounds and just re-shade. NaN -> transparent.
+  function shearSample(lat, lon, t) {
+    if (!env || !env.shear) return NaN;
+    var ms = ERA5.sampleTime(env.shear, t, lat, lon);
+    return isFinite(ms) ? ms * 1.94384 : NaN;   // m/s -> kt
   }
-  function fieldBounds() { return [[FIELD_BBOX.s, FIELD_BBOX.w], [FIELD_BBOX.n, FIELD_BBOX.e]]; }
+  function mpiSample(lat, lon) {
+    if (!env) return NaN;
+    return env.mpi ? ERA5.bilinear(env.mpi.values, env.mpi.grid, lat, lon)
+                   : MPI.atPoint(env.sst, lat, lon).mpi;   // NaN over land/cold
+  }
+  function ensureShearLayer() {
+    if (!shearLayer) shearLayer = new FieldLayer({ sample: shearSample, color: shearShade, opacity: 0.62, pane: fieldPane() });
+    return shearLayer;
+  }
+  function ensureMpiLayer() {
+    if (!mpiLayer) mpiLayer = new FieldLayer({ sample: mpiSample, color: mpiShade, opacity: 0.55, pane: fieldPane() });
+    return mpiLayer;
+  }
 
   // Diverging shear ramp (kt): blue (favorable) below 20, red (hostile) above.
   var _SHEAR_STOPS = [
@@ -428,17 +422,11 @@
     [0.75, [240, 190, 40]], [0.88, [248, 113, 32]], [1.00, [203, 35, 28]],
   ];
   var TURBO_GRAD = 'linear-gradient(to right, rgb(48,18,59) 0%, rgb(64,90,211) 13%, rgb(38,150,245) 25%, rgb(27,209,198) 38%, rgb(90,228,122) 50%, rgb(177,224,50) 63%, rgb(240,190,40) 75%, rgb(248,113,32) 88%, rgb(203,35,28) 100%)';
-  function mpiShade(pi) { if (pi.land) return [0, 0, 0, 0]; var c = rampColor(TURBO_STOPS, Math.max(0, Math.min(1, pi.mpi / 160))); return [c[0], c[1], c[2], 255]; }
+  function mpiShade(v) { if (!isFinite(v)) return [0, 0, 0, 0]; var c = rampColor(TURBO_STOPS, Math.max(0, Math.min(1, v / 160))); return [c[0], c[1], c[2], 255]; }
 
-  function shearUrlAt(t) {
-    return shadeFieldUrl(function (lat, lon) {
-      var ms = ERA5.sampleTime(env.shear, t, lat, lon);
-      return isFinite(ms) ? ms * 1.94384 : NaN;   // m/s -> kt
-    }, shearShade);
-  }
-
-  // Coastlines (Natural Earth 110m via jsDelivr), drawn above the field so land
-  // boundaries stay visible under the shading. Best-effort; absent if fetch fails.
+  // Coastlines (Natural Earth 50m via jsDelivr — 110m was visibly blocky at the
+  // game's zooms), drawn above the field so land boundaries stay visible under
+  // the shading. Best-effort; absent if fetch fails.
   var _coastLayer = null, _coastPromise = null;
   function ensureCoastlines() {
     if (_coastLayer) return Promise.resolve(_coastLayer);
@@ -446,7 +434,7 @@
     if (!map.getPane('coastPane')) {
       var p = map.createPane('coastPane'); p.style.zIndex = 320; p.style.pointerEvents = 'none';
     }
-    _coastPromise = fetch('https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_coastline.geojson')
+    _coastPromise = fetch('https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_50m_coastline.geojson')
       .then(function (r) { return r.json(); })
       .then(function (gj) {
         _coastLayer = L.geoJSON(gj, { pane: 'coastPane', interactive: false,
@@ -486,9 +474,7 @@
     var on = $('tog-shear').checked;
     if (on && mpiLayer && map.hasLayer(mpiLayer)) { $('tog-mpi').checked = false; map.removeLayer(mpiLayer); }
     if (!on) { if (shearLayer && map.hasLayer(shearLayer)) map.removeLayer(shearLayer); afterFieldToggle(); return; }
-    var url = shearUrlAt(env.startDayIdx);
-    if (shearLayer) shearLayer.setUrl(url);
-    else shearLayer = L.imageOverlay(url, fieldBounds(), { opacity: 0.62, pane: fieldPane() });
+    ensureShearLayer().setTime(env.startDayIdx);     // no-op redraw if not on the map yet
     if (!map.hasLayer(shearLayer)) shearLayer.addTo(map);
     afterFieldToggle();
   }
@@ -497,12 +483,7 @@
     var on = $('tog-mpi').checked;
     if (on && shearLayer && map.hasLayer(shearLayer)) { $('tog-shear').checked = false; map.removeLayer(shearLayer); }
     if (!on) { if (mpiLayer && map.hasLayer(mpiLayer)) map.removeLayer(mpiLayer); afterFieldToggle(); return; }
-    var url = shadeFieldUrl(function (lat, lon) {
-      var v = env.mpi ? ERA5.bilinear(env.mpi.values, env.mpi.grid, lat, lon) : MPI.atPoint(env.sst, lat, lon).mpi;
-      return { mpi: isFinite(v) ? v : 0, land: !isFinite(v) };
-    }, mpiShade);
-    if (mpiLayer) mpiLayer.setUrl(url);
-    else mpiLayer = L.imageOverlay(url, fieldBounds(), { opacity: 0.55, pane: fieldPane() });
+    ensureMpiLayer().setTime(0);                      // MPI is monthly — time-independent
     if (!map.hasLayer(mpiLayer)) mpiLayer.addTo(map);
     afterFieldToggle();
   }
@@ -576,6 +557,61 @@
   var tutorialActive = false;
   var TUTORIAL_HRS_PER_FRAME = 0.32;   // slower so the demo's captions are readable (~15 s)
 
+  // The storm "head": a glowing cyclone glyph that spins faster and grows as
+  // the storm intensifies (180°-symmetric swirl, so the rotation reads cleanly).
+  var STORM_HEAD_HTML =
+    '<div class="storm-head"><svg class="sh-swirl" viewBox="-20 -20 40 40" aria-hidden="true">' +
+    '<g fill="none" stroke="currentColor" stroke-linecap="round">' +
+    '<path d="M 0 -14 A 14 14 0 0 1 14 0" stroke-width="3"/>' +
+    '<path d="M 0 14 A 14 14 0 0 1 -14 0" stroke-width="3"/>' +
+    '<path d="M -9 0 A 9 9 0 0 1 0 -9" stroke-width="2.6" opacity=".75"/>' +
+    '<path d="M 9 0 A 9 9 0 0 1 0 9" stroke-width="2.6" opacity=".75"/>' +
+    '</g><circle r="4" fill="currentColor"/><circle r="1.5" fill="#08160f"/></svg></div>';
+  function makeStormHead(p) {
+    var mk = L.marker([p.lat, p.lon], {
+      icon: L.divIcon({ className: '', iconSize: [44, 44], iconAnchor: [22, 22], html: STORM_HEAD_HTML }),
+      interactive: false, keyboard: false,
+    }).addTo(trackLayer);
+    mk._el = mk.getElement() && mk.getElement().firstChild;   // the .storm-head div
+    styleStormHead(mk, p.v);
+    return mk;
+  }
+  function styleStormHead(mk, v) {
+    var el = mk._el; if (!el) return;
+    el.style.color = colorForV(v);
+    el.style.transform = 'scale(' + (0.55 + v / 150).toFixed(3) + ')';
+    el.style.setProperty('--spin', Math.max(0.9, 7 - v / 24).toFixed(2) + 's');
+  }
+
+  // Expanding ring at the storm's position when it jumps a Saffir–Simpson
+  // category (+ a haptic tick where supported).
+  var CAT_T = [64, 83, 96, 113, 137];
+  function catStep(v) { var c = 0; for (var k = 0; k < CAT_T.length; k++) if (v >= CAT_T[k]) c = k + 1; return c; }
+  function catPulse(lat, lon, color) {
+    var mk = L.marker([lat, lon], {
+      icon: L.divIcon({ className: '', iconSize: [12, 12], iconAnchor: [6, 6],
+        html: '<span class="cat-pulse" style="color:' + color + '"></span>' }),
+      interactive: false, keyboard: false,
+    }).addTo(trackLayer);
+    setTimeout(function () { if (trackLayer.hasLayer(mk)) trackLayer.removeLayer(mk); }, 950);
+    if (navigator.vibrate) { try { navigator.vibrate(16); } catch (e) {} }
+  }
+
+  // Incremental category-coloured track writer: extends one polyline per
+  // colour run instead of one per hour segment (a long track was hundreds of
+  // SVG paths — heavy on mobile).
+  function trackPen(weight) {
+    var line = null, color = null;
+    return function (p0, p1) {
+      var col = colorForV(p1.v);
+      if (!line || col !== color) {
+        line = L.polyline([[p0.lat, p0.lon], [p1.lat, p1.lon]],
+          { color: col, weight: weight || 3.5, opacity: 0.95, interactive: false }).addTo(trackLayer);
+        color = col;
+      } else line.addLatLng([p1.lat, p1.lon]);
+    };
+  }
+
   function animateTrack(i) {
     var token = ++animToken;                 // supersede any running animation
     viewIdx = i;                             // this seed is now the one being visualised
@@ -589,11 +625,16 @@
     userPanned = false;
 
     var pts = results[i].track;
-    var head = L.circleMarker([pts[0].lat, pts[0].lon],
-      { radius: 6, color: '#fff', weight: 2, fillColor: colorForV(pts[0].v), fillOpacity: 1 }).addTo(trackLayer);
-    // Reset the evolving overlays + clock to the start time.
-    if (flowLayer && map.hasLayer(flowLayer)) flowLayer.setTime(env.startDayIdx);
-    if (shearLayer) shearLayer.setUrl(shearUrlAt(env.startDayIdx));
+    var head = makeStormHead(pts[0]);
+    var pen = trackPen();
+    var lastCat = catStep(pts[0].v);
+    // Reset the evolving overlays + clock to the start time, and hand the
+    // particle layer the storm so the flow spirals into it as it spins up.
+    if (flowLayer && map.hasLayer(flowLayer)) {
+      flowLayer.setTime(env.startDayIdx);
+      flowLayer.setStorm({ lat: pts[0].lat, lon: pts[0].lon, v: pts[0].v });
+    }
+    if (shearLayer) shearLayer.setTime(env.startDayIdx);
     updateClock(0);
     setChartCursor(0);
 
@@ -604,23 +645,24 @@
       lastMs = ts;
       simHr = Math.min(maxHr, simHr + (tutorialActive ? TUTORIAL_HRS_PER_FRAME : HRS_PER_FRAME));
       var upto = Math.min(pts.length, Math.floor(simHr) + 1);
-      for (var s = drawn; s < upto; s++) {
-        L.polyline([[pts[s - 1].lat, pts[s - 1].lon], [pts[s].lat, pts[s].lon]],
-          { color: colorForV(pts[s].v), weight: 3.5, opacity: 0.95 }).addTo(trackLayer);
-      }
+      for (var s = drawn; s < upto; s++) pen(pts[s - 1], pts[s]);
       drawn = upto;
       var p = pts[Math.min(pts.length - 1, upto - 1)];
       head.setLatLng([p.lat, p.lon]);
-      head.setStyle({ fillColor: colorForV(p.v), radius: 5 + p.v / 22 });
-      head.bindTooltip('Day ' + (p.hr / 24).toFixed(1) + ' · ' + p.cat + ' · ' + Math.round(p.v) + ' kt',
-        { className: 'track-tip', permanent: false });
+      styleStormHead(head, p.v);
+      var cs = catStep(p.v);
+      if (cs > lastCat) catPulse(p.lat, p.lon, colorForV(p.v));
+      lastCat = cs;
       // Evolve the steering flow + shaded shear field + clock + chart cursor.
       updateClock(p.hr);
       setChartCursor(p.hr);
       if (animHook) animHook(p.hr, p.v);   // tutorial caption driver
-      if (flowLayer && map.hasLayer(flowLayer)) flowLayer.setTime(env.startDayIdx + p.hr / 24);
+      if (flowLayer && map.hasLayer(flowLayer)) {
+        flowLayer.setTime(env.startDayIdx + p.hr / 24);
+        flowLayer.setStorm({ lat: p.lat, lon: p.lon, v: p.v });
+      }
       if (shearLayer && p.hr - lastShearHr >= SHEAR_REBUILD_HR) {
-        lastShearHr = p.hr; shearLayer.setUrl(shearUrlAt(env.startDayIdx + p.hr / 24));
+        lastShearHr = p.hr; shearLayer.setTime(env.startDayIdx + p.hr / 24);
       }
       // Smoothly keep the storm in view: only glide-recentre (animated pan)
       // when it drifts into the outer 30% of the frame. Far fewer pans than a
@@ -635,8 +677,9 @@
           map.panTo([p.lat, p.lon], { animate: true, duration: 0.9, easeLinearity: 0.4 });
         }
       }
-      if (simHr < maxHr) requestAnimationFrame(frame);
-      else if (follow && !userPanned) {
+      if (simHr < maxHr) { requestAnimationFrame(frame); return; }
+      if (flowLayer) flowLayer.setStorm(null);   // dissipated — release the vortex
+      if (follow && !userPanned) {
         // Pull back to the whole journey once it finishes playing.
         var b = L.latLngBounds(pts.map(function (q) { return [q.lat, q.lon]; }));
         map.fitBounds(b.pad(0.3), { animate: true, maxZoom: 6 });
@@ -1026,7 +1069,7 @@
   function renderGenesisHints(month) {
     if (attractLayer) { map.removeLayer(attractLayer); attractLayer = null; }
     attractLayer = L.layerGroup();
-    (MONTH_GENESIS[month] || []).forEach(function (b) {
+    ((BASIN_GENESIS.atl || {})[month] || []).forEach(function (b) {
       L.circle([b.lat, b.lon], {
         pane: genesisPane(), radius: b.sd * 120000, interactive: false,
         color: '#2DBDA0', weight: 1, opacity: 0.38, dashArray: '3 6',
@@ -1072,9 +1115,7 @@
         if (!flowLayer) flowLayer = new ParticleLayer();
         flowLayer.setField(env).setTime(env.startDayIdx);
         if (!map.hasLayer(flowLayer)) flowLayer.addTo(map);
-        var url = shearUrlAt(env.startDayIdx);
-        if (shearLayer) shearLayer.setUrl(url);
-        else shearLayer = L.imageOverlay(url, fieldBounds(), { opacity: 0.55, pane: fieldPane() });
+        ensureShearLayer().setTime(env.startDayIdx);
         if (!map.hasLayer(shearLayer)) shearLayer.addTo(map);
         showCoastlines(true);
         // No colorbar on the home screen — it belongs to gameplay and would
@@ -1091,6 +1132,7 @@
     stopAttract();                                  // tear down the home-screen preview
     env = null; seeds = []; results = null; chosenIdx = -1; viewIdx = -1;
     animToken++;                                    // stop any running animation
+    if (flowLayer) flowLayer.setStorm(null);        // no storm — no vortex in the flow
     if (seedLayer) seedLayer.clearLayers();
     if (trackLayer) trackLayer.clearLayers();
     // Detach the heat fields (rebuilt for the new month by renderShear/renderMpi).
@@ -1164,16 +1206,16 @@
     var end = 1; while (end < pts.length && pts[end].hr <= b.hr) end++;
     var p = pts[Math.min(pts.length - 1, end - 1)];
     var dayF = env.startDayIdx + p.hr / 24;
-    if (shearLayer && b.field === 'shear') shearLayer.setUrl(shearUrlAt(dayF));   // field AT this time (blue→red)
-    if (flowLayer && map.hasLayer(flowLayer)) flowLayer.setTime(dayF);
-    trackLayer.clearLayers();
-    for (var s = 1; s < end; s++) {
-      L.polyline([[pts[s - 1].lat, pts[s - 1].lon], [pts[s].lat, pts[s].lon]],
-        { color: colorForV(pts[s].v), weight: 3.6, opacity: 0.96 }).addTo(trackLayer);
+    if (shearLayer && b.field === 'shear') shearLayer.setTime(dayF);   // field AT this time (blue→red)
+    if (flowLayer && map.hasLayer(flowLayer)) {
+      flowLayer.setTime(dayF);
+      flowLayer.setStorm({ lat: p.lat, lon: p.lon, v: p.v });   // flow spirals into the frozen storm
     }
-    L.circleMarker([p.lat, p.lon], { radius: 5 + p.v / 22, color: '#fff', weight: 2, fillColor: colorForV(p.v), fillOpacity: 1 })
-      .bindTooltip(catLabel(p.cat) + ' · ' + Math.round(p.v) + ' kt', { permanent: true, direction: 'top', className: 'track-tip' })
-      .addTo(trackLayer);
+    trackLayer.clearLayers();
+    var pen = trackPen();
+    for (var s = 1; s < end; s++) pen(pts[s - 1], pts[s]);
+    makeStormHead(p).bindTooltip(catLabel(p.cat) + ' · ' + Math.round(p.v) + ' kt',
+      { permanent: true, direction: 'top', className: 'track-tip', offset: [0, -18] });
     updateClock(p.hr);
     $('tut-caption').innerHTML = b.html;
     $('tut-progress').textContent = (tutStep + 1) + ' / ' + TUT_BEATS.length;
