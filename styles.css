@@ -226,19 +226,30 @@ svg.ic, .brand-mark, .btn-ic, .v-ic { display: inline-block; fill: none; }
 .attract-cap .ac-sub { color: var(--ink-dim); font-size: 11.5px; }
 .attract-cap .ac-sub b { color: var(--ink); }
 
-/* first-load tutorial overlay (caption + controls over the map) */
-.tutorial { position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%);
-  z-index: 700; width: min(560px, 92%); display: flex; flex-direction: column; gap: 10px;
-  padding: 14px 16px; border-radius: 16px; color: var(--ink);
-  background: rgba(8,28,23,.9); border: 1px solid var(--line-bright);
-  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); box-shadow: var(--sh-2);
-  animation: fadein .35s ease; }
-.tut-caption { font-size: 14px; line-height: 1.5; min-height: 2.8em; }
+/* first-load walkthrough — lives in the pick-stage panel so the REAL toggles
+   stay visible below it; shown only while #app has .tut-mode. */
+.tut-panel { display: none; flex-direction: column; gap: 10px; margin-bottom: 14px;
+  padding: 14px; border-radius: var(--r); background: var(--surface-2);
+  border: 1px solid var(--line-bright); box-shadow: var(--sh-1); animation: fadein .3s ease; }
+#app.tut-mode #tut-panel { display: flex; }
+/* in tutorial mode, hide the seed-picking UI but keep the env toggles on show */
+#app.tut-mode #stage-pick > h2,
+#app.tut-mode #stage-pick > .muted,
+#app.tut-mode #stage-pick > #seed-list,
+#app.tut-mode #stage-pick > #run-btn { display: none; }
+#app.tut-mode .env-toggles { pointer-events: none; }   /* show-only during the demo */
+.tut-head { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--accent-2); }
+.tut-caption { font-size: 13.5px; line-height: 1.55; color: var(--ink); margin: 0; min-height: 4.6em; }
 .tut-caption b { color: var(--accent-2); font-weight: 700; }
-.tut-bar { display: flex; align-items: center; gap: 10px; }
+.tut-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .tut-spacer { flex: 1; }
 .tut-progress { font-family: var(--mono); font-size: 11.5px; color: var(--ink-faint); }
-.tut-btn { padding: 7px 16px; }
+.tut-btn { padding: 7px 14px; }
+/* the toggle this step is teaching, glowing */
+.env-toggles label.tut-hi { border-radius: var(--r-sm); padding: 4px 8px; margin: -4px -8px;
+  box-shadow: 0 0 0 2px var(--accent-2); background: var(--glow-soft);
+  animation: tutpulse 1.6s ease-in-out infinite; }
+@keyframes tutpulse { 0%,100% { box-shadow: 0 0 0 2px var(--accent-2); } 50% { box-shadow: 0 0 0 4px var(--glow-line); } }
 .how-link { display: inline-block; margin-top: 6px; color: var(--accent-2); font-weight: 600;
   text-decoration: none; cursor: pointer; }
 .how-link:hover { text-decoration: underline; }

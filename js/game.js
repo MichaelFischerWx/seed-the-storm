@@ -1116,7 +1116,7 @@
   function goHome() {
     sharedMode = false;
     nextRound = null;
-    if (tutorialActive) { tutorialActive = false; animHook = null; $('tutorial').classList.add('hidden'); }
+    if (tutorialActive) { tutorialActive = false; document.getElementById('app').classList.remove('tut-mode'); }
     restoreSharedUI();
     resetRound();
     $('score-badge').classList.add('hidden');
@@ -1125,68 +1125,93 @@
   }
 
   // ---- first-load tutorial -------------------------------------------------
-  // A scripted, skippable demo of one real storm: it intensifies under warm
-  // water + low shear, then tears apart in a wall of high shear — doubling as a
-  // live tour of the Ocean-potential and Wind-shear overlays. Hand-picked,
-  // deterministic scenario (verified to peak Cat 4 then dissipate via shear).
+  // A stepped (you click through), skippable walkthrough of one real, hand-
+  // picked storm: it intensifies under high MPI + low shear, then weakens in
+  // strong shear. Runs ON the pick-stage layout so the REAL Wind-shear /
+  // Ocean-potential toggles are visible — the active one is highlighted each
+  // step — teaching where those controls are. Deterministic scenario, verified
+  // (35 kt → Cat 4 114 kt under ~4 kt shear → dissipates at ~71 kt shear).
   var TUT_SCN = { b: 'atl', y: 2005, m: 9, d: 6, la: 24, lo: -66 };
   var TUT_BEATS = [
-    { hr: 0,   field: 'mpi',   html: 'Meet a baby storm over <b>bath-warm water</b>. The <b>Ocean potential</b> layer (warmer = more fuel) shows how strong it could get here.' },
-    { hr: 30,  field: 'shear', html: 'It sits under <b>very low wind shear</b> — the calm <b>blue</b> on the <b>Wind shear</b> layer. Low shear lets a storm organise…' },
-    { hr: 84,  field: 'shear', html: '…and it erupts into a <b>Category 4 hurricane</b>. Warm water + low shear is the whole recipe.' },
-    { hr: 116, field: 'shear', html: 'Then it curves north into a wall of <b>strong shear</b> (<b>red</b>) — which tilts the storm and rips it apart.' },
-    { hr: 150, field: 'shear', html: 'Shear wins; it fizzles out. <b>Your turn:</b> pick the seed that finds warm water and stays under low shear.' },
+    { hr: 0,   field: 'mpi',   html: 'A weak disturbance (~35 kt) sits over a deep warm pool. Sea-surface temperature sets the <b>maximum potential intensity (MPI)</b> — the ceiling on how strong a storm can get. The highlighted <b>Ocean&nbsp;potential</b> layer maps it; here it’s very high.' },
+    { hr: 36,  field: 'shear', html: '<b>Vertical wind shear is weak</b> — the calm blue on the highlighted <b>Wind&nbsp;shear</b> layer. With little shear the vortex stays vertically stacked and convection wraps the core, so it intensifies rapidly.' },
+    { hr: 88,  field: 'shear', html: 'Over warm water and low shear it reaches <b>Category&nbsp;4</b>, climbing toward its potential intensity. High MPI + low shear is the classic rapid-intensification setup.' },
+    { hr: 116, field: 'shear', html: 'Recurving poleward, it runs into <b>strong deep-layer shear</b> (red). Shear tilts and <b>ventilates</b> the vortex — fluxing dry, low-entropy air into the core — so it weakens.' },
+    { hr: 150, field: 'shear', html: 'Shear and cooler water win; it drops below hurricane strength. <b>Your goal:</b> seed the storm where MPI is high and vertical shear stays low.' },
   ];
-  var tutBeat = -1;
+  var tutStep = 0;
 
-  function tutSetField(field) {
-    $('tog-mpi').checked = (field === 'mpi');
-    $('tog-shear').checked = (field === 'shear');
+  // Highlight the real toggle button this step is about (Wind shear / Ocean potential).
+  function tutHighlight(field) {
+    [].forEach.call(document.querySelectorAll('#stage-pick .env-toggles label'), function (l) { l.classList.remove('tut-hi'); });
+    var box = $(field === 'mpi' ? 'tog-mpi' : 'tog-shear');
+    var lab = box && box.closest('label');
+    if (lab) lab.classList.add('tut-hi');
+  }
+
+  // Render the storm frozen at the current step: track drawn up to that hour,
+  // the field shaded for that time, the right toggle on + highlighted.
+  function tutShowStep() {
+    if (!results || !results[0]) return;
+    var b = TUT_BEATS[tutStep], pts = results[0].track;
+    $('tog-mpi').checked = (b.field === 'mpi');
+    $('tog-shear').checked = (b.field === 'shear');
     renderMpi(); renderShear();
-  }
-  function tutShowBeat(i) {
-    if (i <= tutBeat || i >= TUT_BEATS.length) return;
-    tutBeat = i;
-    var b = TUT_BEATS[i];
-    tutSetField(b.field);
+    var end = 1; while (end < pts.length && pts[end].hr <= b.hr) end++;
+    var p = pts[Math.min(pts.length - 1, end - 1)];
+    var dayF = env.startDayIdx + p.hr / 24;
+    if (shearLayer && b.field === 'shear') shearLayer.setUrl(shearUrlAt(dayF));   // field AT this time (blue→red)
+    if (flowLayer && map.hasLayer(flowLayer)) flowLayer.setTime(dayF);
+    trackLayer.clearLayers();
+    for (var s = 1; s < end; s++) {
+      L.polyline([[pts[s - 1].lat, pts[s - 1].lon], [pts[s].lat, pts[s].lon]],
+        { color: colorForV(pts[s].v), weight: 3.6, opacity: 0.96 }).addTo(trackLayer);
+    }
+    L.circleMarker([p.lat, p.lon], { radius: 5 + p.v / 22, color: '#fff', weight: 2, fillColor: colorForV(p.v), fillOpacity: 1 })
+      .bindTooltip(catLabel(p.cat) + ' · ' + Math.round(p.v) + ' kt', { permanent: true, direction: 'top', className: 'track-tip' })
+      .addTo(trackLayer);
+    updateClock(p.hr);
     $('tut-caption').innerHTML = b.html;
-    $('tut-progress').textContent = (i + 1) + ' / ' + TUT_BEATS.length;
-    if (i === TUT_BEATS.length - 1) $('tut-play').classList.remove('hidden');   // final beat → offer Play
+    $('tut-progress').textContent = (tutStep + 1) + ' / ' + TUT_BEATS.length;
+    tutHighlight(b.field);
+    $('tut-back').disabled = (tutStep === 0);
+    var last = tutStep === TUT_BEATS.length - 1;
+    $('tut-next').classList.toggle('hidden', last);
+    $('tut-play').classList.toggle('hidden', !last);
   }
+  function tutNext() { if (tutStep < TUT_BEATS.length - 1) { tutStep++; tutShowStep(); } }
+  function tutBack() { if (tutStep > 0) { tutStep--; tutShowStep(); } }
 
   function runTutorial() {
-    tutorialActive = true; tutBeat = -1;
+    tutorialActive = true; tutStep = 0;
     var basin = BASINS[TUT_SCN.b];
     game = { round: 0, total: 0, totalAce: 0, rows: [], mode: basin.key, objective: 'ace' };
-    Object.keys(stages).forEach(function (k) { stages[k].classList.add('hidden'); });
     $('score-badge').classList.add('hidden');
     $('basin-name').textContent = ''; $('round-label').textContent = 'How it works';
-    var clk = $('map-clock'); if (clk) clk.classList.remove('hidden');
-    $('tut-play').classList.add('hidden');
-    $('tut-caption').innerHTML = 'Loading a sample storm…';
+    document.getElementById('app').classList.add('tut-mode');   // CSS shows #tut-panel + toggles, hides seed bits
+    showStage('pick');
+    $('tut-caption').textContent = 'Loading a sample storm…';
     $('tut-progress').textContent = '';
-    $('tutorial').classList.remove('hidden');
+    $('tut-next').classList.add('hidden'); $('tut-play').classList.add('hidden'); $('tut-back').disabled = true;
     loadEnv(basin.key, TUT_SCN.y, TUT_SCN.m, TUT_SCN.d - 1).then(function (e) {
       if (!tutorialActive) return;                 // skipped while loading
       env = e; env.startDayIdx = TUT_SCN.d - 1; env.excludeEPac = !!basin.excludeEPac;
       seeds = [{ lat: TUT_SCN.la, lon: TUT_SCN.lo }];
       chosenIdx = 0; viewIdx = 0;
       results = Model.runSeeds(env, seeds);
+      dealDate = { year: TUT_SCN.y, month: TUT_SCN.m, day: TUT_SCN.d, basin: basin.key };
+      if (seedLayer) seedLayer.clearLayers();
       if (basin.view) map.setView(basin.view.center, basin.view.zoom, { animate: false });
       $('tog-flow').checked = true; renderFlow();
-      dealDate = { year: TUT_SCN.y, month: TUT_SCN.m, day: TUT_SCN.d, basin: basin.key };
-      animHook = function (hr) {
-        for (var k = TUT_BEATS.length - 1; k >= 0; k--) { if (hr >= TUT_BEATS[k].hr) { tutShowBeat(k); break; } }
-      };
-      tutShowBeat(0);
-      animateTrack(0);
+      tutStep = 0; tutShowStep();
     }).catch(function (err) { console.error(err); endTutorial(); });
   }
 
   function endTutorial() {
-    tutorialActive = false; animHook = null; animToken++;
+    tutorialActive = false;
+    document.getElementById('app').classList.remove('tut-mode');
+    [].forEach.call(document.querySelectorAll('#stage-pick .env-toggles label'), function (l) { l.classList.remove('tut-hi'); });
     try { window.localStorage.setItem('seedstorm_tutorial_seen', '1'); } catch (e) {}
-    $('tutorial').classList.add('hidden');
     goHome();
   }
 
@@ -1550,6 +1575,8 @@
     $('lb-submit-btn').addEventListener('click', submitScore);
     $('lb-name').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); submitScore(); } });
     // tutorial controls + the intro "How it works" replay link
+    $('tut-back').addEventListener('click', tutBack);
+    $('tut-next').addEventListener('click', tutNext);
     $('tut-skip').addEventListener('click', endTutorial);
     $('tut-play').addEventListener('click', endTutorial);
     $('how-it-works').addEventListener('click', function (e) { e.preventDefault(); runTutorial(); });
