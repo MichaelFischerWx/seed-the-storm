@@ -58,7 +58,14 @@
     // The valid-time clock belongs to the live map stages only.
     var clk = $('map-clock');
     if (clk) clk.classList.toggle('hidden', !(name === 'pick' || name === 'result'));
+    // Mobile bottom sheet: each stage has a natural height — reading/picking
+    // wants content, playback wants the map, the summary wants the whole list.
+    if (window.Sheet && Sheet.active()) {
+      var snap = { intro: 'half', pick: 'half', result: 'peek', summary: 'full' }[name];
+      if (snap) Sheet.set(snap);
+    }
   }
+  function sheetPx() { return (window.Sheet && Sheet.active()) ? Sheet.visiblePx() : 0; }
 
   // Valid-time clock: deal date + `hr` hours into the integration.
   function updateClock(hr) {
@@ -206,13 +213,13 @@
         env = e;
         env.startDayIdx = startDayIdx;            // prefetch used day 0; set this round's real start day
         env.excludeEPac = !!basin.excludeEPac;
+        showStage('pick');                        // first: the sheet snap feeds the fitBounds padding below
         placeSeeds();
         renderFlow();
         renderShear();
         renderMpi();
         updateClock(0);
         status('');
-        showStage('pick');
       });
     }).catch(function (e) {
       console.error(e);
@@ -308,13 +315,14 @@
       seedMarkers.push(m);
     });
     // Frame ALL seeds with comfortable margins. Reserve the top for the clock
-    // and ~100 px at the bottom for the field legend (~90 px tall, bottom-left)
-    // so deep-tropics seeds are never tucked behind it or jammed at the edge.
+    // and the bottom for the field legend (~90 px, bottom-left) — plus, on
+    // mobile, the bottom sheet — so no seed hides behind chrome.
     var grp = L.featureGroup(seedMarkers);
     if (seedMarkers.length) {
+      var pb = Math.min(map.getSize().y * 0.6, sheetPx() ? sheetPx() + 100 : 100);
       map.fitBounds(grp.getBounds().pad(0.12), {
         animate: false, maxZoom: 5,
-        paddingTopLeft: [24, 46], paddingBottomRight: [24, 100],
+        paddingTopLeft: [24, 46], paddingBottomRight: [24, pb],
       });
     }
   }
@@ -391,10 +399,13 @@
     return mpiLayer;
   }
 
-  // Diverging shear ramp (kt): blue (favorable) below 20, red (hostile) above.
+  // Diverging shear ramp (kt): azure → teal (favorable) through a DARK slate
+  // neutral at 20 kt → amber → crimson (hostile). The dark midpoint recedes
+  // into the basemap so the extremes pop; the old light-gray middle read as a
+  // milky wash over the dark map.
   var _SHEAR_STOPS = [
-    [0, [37, 99, 175]], [10, [110, 168, 214]], [20, [205, 214, 224]],
-    [30, [233, 128, 74]], [40, [192, 57, 43]],
+    [0, [56, 142, 231]], [10, [45, 189, 160]], [20, [62, 76, 92]],
+    [30, [233, 125, 64]], [40, [225, 49, 89]],
   ];
   function lerp(a, b, t) { return [Math.round(a[0] + (b[0] - a[0]) * t), Math.round(a[1] + (b[1] - a[1]) * t), Math.round(a[2] + (b[2] - a[2]) * t)]; }
   function rampColor(stops, x) {
@@ -409,7 +420,7 @@
   }
   // Shear: diverging "favorability" ramp — blue (favorable) below 20 kt, red
   // (hostile) above. Red = hostile shear.
-  var FAV_GRAD = 'linear-gradient(to right, rgb(37,99,175), rgb(110,168,214), rgb(205,214,224), rgb(233,128,74), rgb(192,57,43))';
+  var FAV_GRAD = 'linear-gradient(to right, rgb(56,142,231), rgb(45,189,160), rgb(62,76,92), rgb(233,125,64), rgb(225,49,89))';
   function favColor(hostility) { var c = rampColor(_SHEAR_STOPS, Math.max(0, Math.min(1, hostility)) * 40); return [c[0], c[1], c[2], 255]; }
   function shearShade(kt) { if (!isFinite(kt)) return [0, 0, 0, 0]; return favColor(kt / 40); }
 
@@ -427,7 +438,7 @@
   // Coastlines (Natural Earth 50m via jsDelivr — 110m was visibly blocky at the
   // game's zooms), drawn above the field so land boundaries stay visible under
   // the shading. Best-effort; absent if fetch fails.
-  var _coastLayer = null, _coastPromise = null;
+  var _coastLayer = null, _coastPromise = null, _coastGeo = null;
   function ensureCoastlines() {
     if (_coastLayer) return Promise.resolve(_coastLayer);
     if (_coastPromise) return _coastPromise;
@@ -437,6 +448,7 @@
     _coastPromise = fetch('https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_50m_coastline.geojson')
       .then(function (r) { return r.json(); })
       .then(function (gj) {
+        _coastGeo = gj;                      // raw geojson reused by the share-card renderer
         _coastLayer = L.geoJSON(gj, { pane: 'coastPane', interactive: false,
           style: { color: '#e3eaf6', weight: 0.8, opacity: 0.65, fill: false } });
         return _coastLayer;
@@ -557,19 +569,36 @@
   var tutorialActive = false;
   var TUTORIAL_HRS_PER_FRAME = 0.32;   // slower so the demo's captions are readable (~15 s)
 
-  // The storm "head": a glowing cyclone glyph that spins faster and grows as
-  // the storm intensifies (180°-symmetric swirl, so the rotation reads cleanly).
-  var STORM_HEAD_HTML =
-    '<div class="storm-head"><svg class="sh-swirl" viewBox="-20 -20 40 40" aria-hidden="true">' +
-    '<g fill="none" stroke="currentColor" stroke-linecap="round">' +
-    '<path d="M 0 -14 A 14 14 0 0 1 14 0" stroke-width="3"/>' +
-    '<path d="M 0 14 A 14 14 0 0 1 -14 0" stroke-width="3"/>' +
-    '<path d="M -9 0 A 9 9 0 0 1 0 -9" stroke-width="2.6" opacity=".75"/>' +
-    '<path d="M 9 0 A 9 9 0 0 1 0 9" stroke-width="2.6" opacity=".75"/>' +
-    '</g><circle r="4" fill="currentColor"/><circle r="1.5" fill="#08160f"/></svg></div>';
+  // The storm "head": synthetic spiralling cloud bands (satellite-IR look).
+  // Two logarithmic-spiral rainbands in layered white strokes (wide+faint
+  // under narrow+bright = soft cloud edges with no SVG filters, so it stays
+  // cheap to spin at 30 fps), over a category-coloured glow. The whole cloud
+  // deck rotates; an eye clears at hurricane strength.
+  var STORM_HEAD_HTML = (function () {
+    function arm(rot) {
+      var pts = [];
+      for (var th = 0; th <= 3.6; th += 0.18) {
+        var r = 4.2 * Math.exp(0.34 * th);
+        var a = th + rot;
+        pts.push((r * Math.cos(a)).toFixed(1) + ' ' + (r * Math.sin(a)).toFixed(1));
+      }
+      return 'M ' + pts.join(' L ');
+    }
+    var arms = [arm(0), arm(Math.PI)], paths = '';
+    [[7.5, 0.16], [4.6, 0.36], [2.3, 0.85]].forEach(function (l) {
+      arms.forEach(function (d) {
+        paths += '<path d="' + d + '" stroke-width="' + l[0] + '" opacity="' + l[1] + '"/>';
+      });
+    });
+    return '<div class="storm-head"><svg class="sh-swirl" viewBox="-24 -24 48 48" aria-hidden="true">' +
+      '<circle class="sh-glow3" r="16"/><circle class="sh-glow2" r="11"/><circle class="sh-glow1" r="7"/>' +
+      '<g fill="none" stroke="#EAF6FF" stroke-linecap="round" stroke-linejoin="round">' + paths + '</g>' +
+      '<circle fill="#F2FAFF" opacity=".95" r="4.6"/>' +
+      '<circle class="sh-eye" r="1.8"/></svg></div>';
+  })();
   function makeStormHead(p) {
     var mk = L.marker([p.lat, p.lon], {
-      icon: L.divIcon({ className: '', iconSize: [44, 44], iconAnchor: [22, 22], html: STORM_HEAD_HTML }),
+      icon: L.divIcon({ className: '', iconSize: [48, 48], iconAnchor: [24, 24], html: STORM_HEAD_HTML }),
       interactive: false, keyboard: false,
     }).addTo(trackLayer);
     mk._el = mk.getElement() && mk.getElement().firstChild;   // the .storm-head div
@@ -579,8 +608,9 @@
   function styleStormHead(mk, v) {
     var el = mk._el; if (!el) return;
     el.style.color = colorForV(v);
-    el.style.transform = 'scale(' + (0.55 + v / 150).toFixed(3) + ')';
+    el.style.transform = 'scale(' + (0.5 + v / 140).toFixed(3) + ')';
     el.style.setProperty('--spin', Math.max(0.9, 7 - v / 24).toFixed(2) + 's');
+    el.classList.toggle('has-eye', v >= 64);   // the eye clears at hurricane strength
   }
 
   // Expanding ring at the storm's position when it jumps a Saffir–Simpson
@@ -617,6 +647,9 @@
     viewIdx = i;                             // this seed is now the one being visualised
     trackLayer.clearLayers();
     results.forEach(function (r, k) { if (k !== i) drawTrackPolyline(k, null, true); });
+    // Playback is a map moment: drop the mobile sheet to a peek so the storm
+    // has the screen (it pops back up when the run finishes).
+    if (window.Sheet && Sheet.active()) Sheet.set('peek');
 
     // Follow the storm on small/narrow maps (mobile), where it otherwise drifts
     // off-screen; on wide desktop maps the whole field is visible, so following
@@ -679,10 +712,12 @@
       }
       if (simHr < maxHr) { requestAnimationFrame(frame); return; }
       if (flowLayer) flowLayer.setStorm(null);   // dissipated — release the vortex
+      if (window.Sheet && Sheet.active()) Sheet.raiseIfUntouched('half');   // bring the verdict back up
       if (follow && !userPanned) {
         // Pull back to the whole journey once it finishes playing.
         var b = L.latLngBounds(pts.map(function (q) { return [q.lat, q.lon]; }));
-        map.fitBounds(b.pad(0.3), { animate: true, maxZoom: 6 });
+        map.fitBounds(b.pad(0.3), { animate: true, maxZoom: 6,
+          paddingBottomRight: [0, Math.min(map.getSize().y * 0.5, sheetPx())] });
       }
     }
     requestAnimationFrame(frame);
@@ -755,6 +790,7 @@
     $('teach').innerHTML = teachText(chosen, best, chosenIdx, bi);
     renderCompare();
     drawIntensityChart();
+    prebuildStormCard();   // render the share card now so the Share tap is instant
   }
 
   function describe(r) {
@@ -913,18 +949,21 @@
     }
     return pcts[pcts.length - 1];
   }
+  // Percentile of this storm among real same-basin/month storms, or null.
+  function climoPct(r) {
+    if (!climo || !climo.basins || !dealDate || !r || r.peakV < 34) return null;
+    var bm = (climo.basins[dealDate.basin] || {})[String(dealDate.month)];
+    if (!bm) return null;                              // sparse/absent basin-month (e.g. N. Indian midsummer)
+    var vmax = game.objective === 'vmax';
+    var pct = pctOf(vmax ? r.peakV : r.ace, vmax ? bm.lmi : bm.ace, climo.pcts);
+    return pct == null ? null : Math.max(1, Math.min(99, Math.round(pct)));
+  }
   function renderClimoLine(r) {
     var el = $('climo-line'); if (!el) return;
-    function hide() { el.classList.add('hidden'); el.innerHTML = ''; }
-    if (!climo || !climo.basins || !dealDate || !r) return hide();
-    if (r.peakV < 34) return hide();                   // never a tropical storm — nothing to rank
-    var bm = (climo.basins[dealDate.basin] || {})[String(dealDate.month)];
-    if (!bm) return hide();                            // sparse/absent basin-month (e.g. N. Indian midsummer)
+    var pr = climoPct(r);
+    if (pr == null) { el.classList.add('hidden'); el.innerHTML = ''; return; }
     var vmax = game.objective === 'vmax';
     var val = vmax ? r.peakV : r.ace;
-    var pct = pctOf(val, vmax ? bm.lmi : bm.ace, climo.pcts);
-    if (pct == null) return hide();
-    var pr = Math.max(1, Math.min(99, Math.round(pct)));
     var label = MONTH_NAMES[dealDate.month] + ' ' + (MODE_LABEL[dealDate.basin] || '');
     var yrs = climo.years ? '’' + String(climo.years[0]).slice(2) + '–’' + String(climo.years[1]).slice(2) : '';
     var what = vmax ? (Math.round(val) + '-kt peak') : (val.toFixed(1) + ' ACE');
@@ -1131,6 +1170,7 @@
   function resetRound() {
     stopAttract();                                  // tear down the home-screen preview
     env = null; seeds = []; results = null; chosenIdx = -1; viewIdx = -1;
+    stormCardP = null; gameCardP = null;            // stale share cards die with the round
     animToken++;                                    // stop any running animation
     if (flowLayer) flowLayer.setStorm(null);        // no storm — no vortex in the flow
     if (seedLayer) seedLayer.clearLayers();
@@ -1329,6 +1369,7 @@
     });
 
     renderLeaderboard(headline, avgPct, isBest, prevBest);
+    gameCardP = buildGameCard(); gameCardP.catch(function () {});   // pre-render the recap card
     showStage('summary');
   }
 
@@ -1492,11 +1533,98 @@
       showToast('Link copied — paste it anywhere');
     } catch (e) { window.prompt('Copy this link:', url); }
   }
-  function doShare(title, text, url) {
-    if (navigator.share) { navigator.share({ title: title, text: text, url: url }).catch(function () {}); return; }
+  // Save the card locally + put the link on the clipboard (desktop fallback,
+  // and the recovery path when the OS share sheet declines our file).
+  function saveAndCopy(blob, filename, url) {
+    if (blob) {
+      var a = document.createElement('a'), ou = URL.createObjectURL(blob);
+      a.href = ou; a.download = filename || 'seed-the-storm.png';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(ou); }, 4000);
+    }
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(url).then(function () { showToast('Link copied — paste it anywhere'); }, function () { fallbackCopy(url); });
+      navigator.clipboard.writeText(url).then(
+        function () { showToast(blob ? 'Card image saved — link copied' : 'Link copied — paste it anywhere'); },
+        function () { fallbackCopy(url); });
     } else fallbackCopy(url);
+  }
+  // Share with a PNG recap card when the platform can (Web Share API level 2);
+  // otherwise share/copy the link and save the card.
+  function doShare(title, text, url, blob, filename) {
+    if (blob && navigator.share && navigator.canShare && window.File) {
+      try {
+        var f = new File([blob], filename || 'seed-the-storm.png', { type: 'image/png' });
+        if (navigator.canShare({ files: [f] })) {
+          // Some share targets drop `url` when files ride along — bake it into the text.
+          navigator.share({ title: title, text: text + '\n' + url, files: [f] })
+            .catch(function (e) { if (e && e.name !== 'AbortError') saveAndCopy(blob, filename, url); });
+          return;
+        }
+      } catch (e) { /* fall through */ }
+    }
+    if (navigator.share) { navigator.share({ title: title, text: text, url: url }).catch(function () {}); return; }
+    saveAndCopy(blob, filename, url);
+  }
+
+  // ---- recap cards (js/sharecard.js) ----
+  // Built in the background as soon as the reveal/summary shows, so by the
+  // time the player taps Share the blob is ready and navigator.share() runs
+  // inside the tap's user-activation window (Safari is strict about this).
+  var stormCardP = null, gameCardP = null;
+  function buildStormCard(r, s) {
+    if (!window.ShareCard || !env) return Promise.reject(new Error('card unavailable'));
+    var startIdx = env.startDayIdx, shearField = env.shear, landmask = env.landmask;
+    var pr = climoPct(r);
+    var climoText = pr == null ? null
+      : 'Around the ' + ordinal(pr) + ' percentile of real ' + MONTH_NAMES[dealDate.month] + ' ' +
+        (MODE_LABEL[dealDate.basin] || '') + ' storms';
+    return ensureCoastlines().catch(function () { return null; }).then(function () {
+      return ShareCard.storm({
+        track: r.track, ace: r.ace, peakV: r.peakV, peakCat: r.peakCat,
+        objective: game.objective, seed: s,
+        dateLabel: MONTH_NAMES[dealDate.month] + ' ' + dealDate.day + ', ' + dealDate.year,
+        basinLabel: (BASINS[dealDate.basin] || BASINS.atl).name,
+        climoText: climoText,
+        shearAt: shearField ? function (lat, lon) {
+          var ms = ERA5.sampleTime(shearField, startIdx, lat, lon);
+          return isFinite(ms) ? ms * 1.94384 : NaN;
+        } : null,
+        landAt: landmask ? function (lat, lon) {
+          var f = ERA5.bilinear(landmask.values, landmask.grid, lat, lon);
+          return isFinite(f) ? f : 0;
+        } : null,
+        shearColor: shearShade, colorForV: colorForV, coast: _coastGeo,
+        url: 'michaelfischerwx.github.io/seed-the-storm',
+      });
+    });
+  }
+  function buildGameCard() {
+    if (!window.ShareCard) return Promise.reject(new Error('card unavailable'));
+    return ShareCard.game({
+      objective: game.objective, totalAce: game.totalAce, bestPeakKt: bestPeakKt(),
+      avgPct: Math.round(game.total / ROUNDS), modeLabel: MODE_LABEL[game.mode] || 'Seed the Storm',
+      rows: game.rows.map(function (r) {
+        return { round: r.round, date: r.date, label: r.label, cat: r.cat, ace: r.ace,
+                 peakV: r.peakV, points: r.points,
+                 seedColor: SEED_COLORS[SEED_LABELS.indexOf(r.label)] || '#5FD0E6' };
+      }),
+      colorForV: colorForV,
+      url: 'michaelfischerwx.github.io/seed-the-storm',
+    });
+  }
+  function prebuildStormCard() {
+    stormCardP = null;
+    if (!results || chosenIdx < 0) return;
+    var p = buildStormCard(results[chosenIdx], seeds[chosenIdx]);
+    p.catch(function () {});
+    stormCardP = p;
+  }
+  // Resolve with the prebuilt card, or null after a short cap so a slow/failed
+  // render never blocks sharing the plain link.
+  function cardOrNull(p, ms) {
+    if (!p) return Promise.resolve(null);
+    return Promise.race([p.catch(function () { return null; }),
+      new Promise(function (r) { setTimeout(function () { r(null); }, ms || 700); })]);
   }
 
   function shareStorm() {
@@ -1507,7 +1635,10 @@
     var txt = 'I read the storm environment and spun up a ' + Math.round(r.peakV) + '-kt ' +
       catLabel(r.peakCat) + ' (' + r.ace.toFixed(1) + ' ACE) in Seed the Storm — can you forecast a stronger one?';
     track('share', { kind: 'storm', basin: dealDate.basin, peak_kt: Math.round(r.peakV) });
-    doShare('Seed the Storm', txt, shareLink(payload));
+    cardOrNull(stormCardP).then(function (blob) {
+      doShare('Seed the Storm', txt, shareLink(payload), blob,
+        'seed-the-storm-' + Math.round(r.peakV) + 'kt.png');
+    });
   }
   function shareGame() {
     var vmax = game.objective === 'vmax';
@@ -1521,7 +1652,9 @@
     var txt = 'I scored ' + head + ' reading the storm environment in ' +
       (MODE_LABEL[game.mode] || 'Seed the Storm') + ' — can you beat my forecast?';
     track('share', { kind: 'game', mode: game.mode });
-    doShare('Seed the Storm', txt, shareLink(payload));
+    cardOrNull(gameCardP).then(function (blob) {
+      doShare('Seed the Storm', txt, shareLink(payload), blob, 'seed-the-storm-results.png');
+    });
   }
 
   // Re-run a single shared storm deterministically and animate it.
