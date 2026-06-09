@@ -95,7 +95,10 @@
       // minZoom 3 lets the pick-stage fitBounds zoom out far enough to frame all
       // four seeds even when they're spread wide across a basin on a narrow phone.
       worldCopyJump: false, minZoom: 3, maxZoom: 8, zoomSnap: 0.5, zoomDelta: 0.5,
-      maxBounds: [[0, -180], [60, 180]], maxBoundsViscosity: 1.0,
+      // South edge sits a bit below the 0°N data band so framing a deep-tropics
+      // seed (with bottom padding to clear the legend) isn't shoved back north
+      // by the bounds clamp — which was tucking sub-10°N seeds under the legend.
+      maxBounds: [[-12, -180], [60, 180]], maxBoundsViscosity: 1.0,
     }).setView([26, -52], 4.5);
     map.attributionControl.setPrefix(false);   // drop the "Leaflet" + flag prefix
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
@@ -304,13 +307,14 @@
       m.on('click', function () { if (results) viewSeed(i); else selectSeed(i); });
       seedMarkers.push(m);
     });
-    // Frame ALL seeds with comfortable margins, leaving room for the top clock
-    // and the bottom-left field legend so no pin hides under an overlay.
+    // Frame ALL seeds with comfortable margins. Reserve the top for the clock
+    // and ~100 px at the bottom for the field legend (~90 px tall, bottom-left)
+    // so deep-tropics seeds are never tucked behind it or jammed at the edge.
     var grp = L.featureGroup(seedMarkers);
     if (seedMarkers.length) {
-      map.fitBounds(grp.getBounds().pad(0.18), {
+      map.fitBounds(grp.getBounds().pad(0.12), {
         animate: false, maxZoom: 5,
-        paddingTopLeft: [24, 46], paddingBottomRight: [24, 30],
+        paddingTopLeft: [24, 46], paddingBottomRight: [24, 100],
       });
     }
   }
@@ -1116,7 +1120,7 @@
   function goHome() {
     sharedMode = false;
     nextRound = null;
-    if (tutorialActive) { tutorialActive = false; document.getElementById('app').classList.remove('tut-mode'); }
+    if (tutorialActive) { tutorialActive = false; document.getElementById('app').classList.remove('tut-mode'); resetFieldToggles(); }
     restoreSharedUI();
     resetRound();
     $('score-badge').classList.add('hidden');
@@ -1211,8 +1215,16 @@
     tutorialActive = false;
     document.getElementById('app').classList.remove('tut-mode');
     [].forEach.call(document.querySelectorAll('#stage-pick .env-toggles label'), function (l) { l.classList.remove('tut-hi'); });
+    resetFieldToggles();   // the demo flipped these; restore the game default (shear on)
     try { window.localStorage.setItem('seedstorm_tutorial_seen', '1'); } catch (e) {}
     goHome();
+  }
+
+  // Default field-overlay state for normal play (shear shown, ocean-potential off).
+  function resetFieldToggles() {
+    $('tog-flow').checked = true;
+    $('tog-shear').checked = true;
+    $('tog-mpi').checked = false;
   }
 
   // Undo any DOM tweaks made by the shared-view renderers so normal play looks right.
