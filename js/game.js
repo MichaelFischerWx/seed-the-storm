@@ -1113,9 +1113,28 @@
     var fs = big ? 13 : 10, lwV = big ? 3.4 : 2.4;
     var padL = big ? 54 : 44, padR = big ? 46 : 34, padT = big ? 26 : 12, padB = big ? 26 : 16;
 
+    var showShear = $('tog-track-shear') && $('tog-track-shear').checked;
+    var showMpi = $('tog-track-mpi') && $('tog-track-mpi').checked;
+    var cpts = results[vi].track;
+
     var maxTrackHr = 24;
     results.forEach(function (r) { maxTrackHr = Math.max(maxTrackHr, r.track[r.track.length - 1].hr); });
-    var maxHr = Math.ceil(maxTrackHr / 24) * 24, maxV = 160, maxSh = 40;
+    var maxHr = Math.ceil(maxTrackHr / 24) * 24;
+
+    // Scale the intensity axis to the data so nothing clips at a fixed ceiling
+    // (a Cat 5, or the MPI line — deep-tropics potential intensity routinely
+    // tops 160 kt — used to flatline at the old hard-coded maxV=160) and so a
+    // weak storm isn't squashed at the bottom of an empty 160-kt frame.
+    var peakV = 34;   // include EVERY seed's V (faint context lines) + the MPI line if shown
+    results.forEach(function (r) { r.track.forEach(function (p) { if (p.v > peakV) peakV = p.v; }); });
+    if (showMpi) cpts.forEach(function (p) { if (isFinite(p.mpi) && p.mpi > peakV) peakV = p.mpi; });
+    var maxV = Math.max(80, Math.ceil(peakV * 1.12 / 20) * 20);   // 12% headroom, round to 20s
+    // Shear shares the chart on its own right-hand axis; scale it too (hostile
+    // tracks exceed the old fixed 40 kt, sending the line off the top).
+    var maxSh = 40;
+    if (showShear) cpts.forEach(function (p) { var kt = p.shear * 1.94384; if (kt > maxSh) maxSh = kt; });
+    maxSh = Math.max(40, Math.ceil(maxSh * 1.1 / 10) * 10);
+
     function X(hr) { return padL + (w - padL - padR) * hr / maxHr; }
     // Remember the inset's geometry so the animation time-cursor can align to it.
     if (cv === $('intensity-chart')) chartGeom = { padL: padL, padR: padR, padT: padT, padB: padB, w: w, h: h, maxHr: maxHr };
@@ -1123,21 +1142,19 @@
     function Ysh(kt) { return padT + (h - padT - padB) * (1 - kt / maxSh); }
     ctx.font = fs + "px 'DM Sans', system-ui, sans-serif"; ctx.textBaseline = 'middle';
 
-    // Category gridlines + left (intensity) axis.
+    // Category gridlines + left (intensity) axis — only those within the frame.
     ctx.strokeStyle = 'rgba(36,51,82,.85)'; ctx.fillStyle = '#687c9f'; ctx.lineWidth = 1;
     [34, 64, 96, 137].forEach(function (lv) {
+      if (lv > maxV) return;
       ctx.beginPath(); ctx.moveTo(padL, Y(lv)); ctx.lineTo(w - padR, Y(lv)); ctx.stroke();
       ctx.textAlign = 'right'; ctx.fillText(lv + ' kt', padL - 5, Y(lv));
     });
 
-    var showShear = $('tog-track-shear') && $('tog-track-shear').checked;
-    var showMpi = $('tog-track-mpi') && $('tog-track-mpi').checked;
-    var cpts = results[vi].track;
-
-    // Right (shear) axis ticks, drawn only when the shear line is on.
+    // Right (shear) axis ticks, drawn only when the shear line is on — span
+    // the adaptive shear scale (0 → mid → max).
     if (showShear) {
       ctx.fillStyle = 'rgba(196,210,236,.8)'; ctx.textAlign = 'left';
-      [0, 20, 40].forEach(function (s) { ctx.fillText(s, w - padR + 5, Ysh(s)); });
+      [0, Math.round(maxSh / 2), Math.round(maxSh)].forEach(function (s) { ctx.fillText(s, w - padR + 5, Ysh(s)); });
     }
 
     // Faint context tracks for the other seeds.
@@ -1169,7 +1186,7 @@
     if (showMpi) {
       ctx.setLineDash([2, 3]); ctx.strokeStyle = 'rgba(232,194,106,0.9)'; ctx.lineWidth = big ? 2 : 1.5;
       ctx.beginPath();
-      cpts.forEach(function (p, k) { var x = X(p.hr), y = Y(Math.min(maxV, p.mpi)); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+      cpts.forEach(function (p, k) { var x = X(p.hr), y = Y(isFinite(p.mpi) ? p.mpi : 0); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
       ctx.stroke(); ctx.setLineDash([]);
     }
 
