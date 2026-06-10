@@ -451,7 +451,9 @@ svg.ic, .brand-mark, .btn-ic, .v-ic { display: inline-block; fill: none; }
    JS, rate ∝ intensity); --org (0 ragged TD → 1 buzz-saw major) drives how
    organized the clouds look; the eye clears at hurricane strength. */
 .storm-head { position: relative; width: 52px; height: 52px; pointer-events: none;
-  transition: transform .6s ease, color .5s linear; will-change: transform;
+  /* scale is set per frame from intensity (already smooth) — transitioning
+     transform just made the browser restart a transition 30x/s */
+  transition: color .5s linear; will-change: transform;
   filter: drop-shadow(0 0 6px currentColor); }
 .sh-lyr { position: absolute; inset: 0; width: 100%; height: 100%;
   overflow: visible; color: inherit; }

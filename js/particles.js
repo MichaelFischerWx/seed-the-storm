@@ -112,7 +112,10 @@
       var map = this._map, dpr = window.devicePixelRatio || 1;
       var org = map.containerPointToLayerPoint([0, 0]);
       var dx = this._ox - org.x, dy = this._oy - org.y;
-      if (dx || dy) {
+      // A pan can fire before the canvas has been sized (e.g. the post-deal
+      // viewWithSheet panBy lands before onAdd's reset) — drawImage from a
+      // 0×0 canvas throws. Size it first, then there's nothing to shift.
+      if (this._canvas.width && this._canvas.height && (dx || dy)) {
         var ctx = this._ctx, c = this._canvas;
         ctx.save();
         ctx.setTransform(1, 0, 0, 1, 0, 0);

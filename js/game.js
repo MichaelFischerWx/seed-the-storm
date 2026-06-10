@@ -396,14 +396,46 @@
 
   // Field samplers read the module-level `env` (swapped each round), so the
   // layers persist across rounds and just re-shade. NaN -> transparent.
-  function shearSample(lat, lon, t) {
+  // These run once per FieldLayer pixel (~half a million per render), so they
+  // use a hand-inlined bilinear — the generic ERA5.bilinear measured ~4x
+  // slower at this call volume. Fast path assumes finite corners (true for
+  // shear everywhere; MPI except along coasts) and falls back to a finite-
+  // corner average only when the interpolation comes back NaN.
+  function bilinFast(F, g, lat, lon) {
+    var fi = (lat - g.lat0) / g.dlat, fj = (lon - g.lon0) / g.dlon;
+    if (!(fi >= 0 && fi <= g.ny - 1 && fj >= 0 && fj <= g.nx - 1)) return NaN;
+    var nx = g.nx, i0 = fi | 0, j0 = fj | 0;
+    var i1 = i0 < g.ny - 1 ? i0 + 1 : i0, j1 = j0 < nx - 1 ? j0 + 1 : j0;
+    var di = fi - i0, dj = fj - j0;
+    var v00 = F[i0 * nx + j0], v01 = F[i0 * nx + j1];
+    var v10 = F[i1 * nx + j0], v11 = F[i1 * nx + j1];
+    var top = v00 + (v01 - v00) * dj, bot = v10 + (v11 - v10) * dj;
+    var v = top + (bot - top) * di;
+    if (v === v) return v;
+    // NaN-poisoned corner(s): average whatever is finite (keeps the field
+    // coloured right up to coastlines instead of leaving a one-cell fringe).
+    var s = 0, n = 0;
+    if (v00 === v00) { s += v00; n++; }
+    if (v01 === v01) { s += v01; n++; }
+    if (v10 === v10) { s += v10; n++; }
+    if (v11 === v11) { s += v11; n++; }
+    return n ? s / n : NaN;
+  }
+  // FieldLayer always asks for INTEGER days (it blends the two day canvases
+  // itself), so sample the day frame directly — sampleTime would do two
+  // bilinear reads + a lerp per pixel for nothing, doubling render cost.
+  var _sfField = null, _sfDay = -1, _sfFrame = null;   // per-render frame cache
+  function shearSample(lat, lon, day) {
     if (!env || !env.shear) return NaN;
-    var ms = ERA5.sampleTime(env.shear, t, lat, lon);
-    return isFinite(ms) ? ms * 1.94384 : NaN;   // m/s -> kt
+    if (_sfField !== env.shear || _sfDay !== day) {
+      _sfField = env.shear; _sfDay = day; _sfFrame = ERA5.dayFrame(env.shear, day);
+    }
+    var ms = bilinFast(_sfFrame, env.shear.grid, lat, lon);
+    return ms === ms ? ms * 1.94384 : NaN;   // m/s -> kt
   }
   function mpiSample(lat, lon) {
     if (!env) return NaN;
-    return env.mpi ? ERA5.bilinear(env.mpi.values, env.mpi.grid, lat, lon)
+    return env.mpi ? bilinFast(env.mpi.values, env.mpi.grid, lat, lon)
                    : MPI.atPoint(env.sst, lat, lon).mpi;   // NaN over land/cold
   }
   function ensureShearLayer() {
@@ -438,8 +470,24 @@
   // Shear: diverging "favorability" ramp — blue (favorable) below 20 kt, red
   // (hostile) above. Red = hostile shear.
   var FAV_GRAD = 'linear-gradient(to right, #5e4fa2, #3288bd, #66c2a5, #abdda4, #e6f598, #ffffbf, #fee08b, #fdae61, #f46d43, #d53e4f, #9e0142)';
-  function favColor(hostility) { var c = rampColor(_SHEAR_STOPS, Math.max(0, Math.min(1, hostility)) * 40); return [c[0], c[1], c[2], 255]; }
-  function shearShade(kt) { if (!isFinite(kt)) return [0, 0, 0, 0]; return favColor(kt / 40); }
+  // The shade functions run once per FieldLayer pixel (~half a million per
+  // render), so they index a precomputed 256-entry LUT instead of scanning
+  // the ramp stops every call.
+  var TRANSPARENT = [0, 0, 0, 0];
+  function rampLUT(stops, max) {
+    var lut = new Array(256);
+    for (var i = 0; i < 256; i++) {
+      var c = rampColor(stops, max * i / 255);
+      lut[i] = [c[0], c[1], c[2], 255];
+    }
+    return lut;
+  }
+  var SHEAR_LUT = rampLUT(_SHEAR_STOPS, 40);
+  function shearShade(kt) {
+    if (!isFinite(kt)) return TRANSPARENT;
+    var i = (kt * (255 / 40)) | 0;
+    return SHEAR_LUT[i < 0 ? 0 : i > 255 ? 255 : i];
+  }
 
   // Ocean potential (MPI): a Turbo-style ramp so the field reads as a distinct
   // "heat" map (visually unmistakable from the shear ramp). Low → indigo/blue,
@@ -450,7 +498,12 @@
     [0.75, [240, 190, 40]], [0.88, [248, 113, 32]], [1.00, [203, 35, 28]],
   ];
   var TURBO_GRAD = 'linear-gradient(to right, rgb(48,18,59) 0%, rgb(64,90,211) 13%, rgb(38,150,245) 25%, rgb(27,209,198) 38%, rgb(90,228,122) 50%, rgb(177,224,50) 63%, rgb(240,190,40) 75%, rgb(248,113,32) 88%, rgb(203,35,28) 100%)';
-  function mpiShade(v) { if (!isFinite(v)) return [0, 0, 0, 0]; var c = rampColor(TURBO_STOPS, Math.max(0, Math.min(1, v / 160))); return [c[0], c[1], c[2], 255]; }
+  var TURBO_LUT = rampLUT(TURBO_STOPS, 1);
+  function mpiShade(v) {
+    if (!isFinite(v)) return TRANSPARENT;
+    var i = (v * (255 / 160)) | 0;
+    return TURBO_LUT[i < 0 ? 0 : i > 255 ? 255 : i];
+  }
 
   // Coastlines (Natural Earth 50m via jsDelivr — 110m was visibly blocky at the
   // game's zooms), drawn above the field so land boundaries stay visible under
