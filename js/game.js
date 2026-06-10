@@ -569,36 +569,52 @@
   var tutorialActive = false;
   var TUTORIAL_HRS_PER_FRAME = 0.32;   // slower so the demo's captions are readable (~15 s)
 
-  // The storm "head": synthetic spiralling cloud bands (satellite-IR look).
-  // Two logarithmic-spiral rainbands in layered white strokes (wide+faint
-  // under narrow+bright = soft cloud edges with no SVG filters, so it stays
-  // cheap to spin at 30 fps), over a category-coloured glow. The whole cloud
-  // deck rotates; an eye clears at hurricane strength.
+  // The storm "head": an evolving synthetic cloud system (satellite-IR look).
+  // Two cloud decks — outer rainbands and an inner deck — spin at different
+  // speeds (parallax sells the rotation), drawn as layered white strokes along
+  // logarithmic spirals (wide+faint under narrow+bright = soft cloud edges,
+  // no SVG filters, cheap at 30 fps) over a category-coloured glow.
+  // The look EVOLVES with intensity via the --org (organization) variable:
+  // a depression is ragged and dim with a weak core; as it intensifies the
+  // central dense overcast brightens, the bands wrap solid, the spin tightens,
+  // and an eye clears at hurricane strength.
   var STORM_HEAD_HTML = (function () {
-    function arm(rot) {
+    function arm(rot, a0, b, thMax) {
       var pts = [];
-      for (var th = 0; th <= 3.6; th += 0.18) {
-        var r = 4.2 * Math.exp(0.34 * th);
-        var a = th + rot;
+      for (var th = 0; th <= thMax; th += 0.16) {
+        var r = a0 * Math.exp(b * th), a = th + rot;
         pts.push((r * Math.cos(a)).toFixed(1) + ' ' + (r * Math.sin(a)).toFixed(1));
       }
       return 'M ' + pts.join(' L ');
     }
-    var arms = [arm(0), arm(Math.PI)], paths = '';
-    [[7.5, 0.16], [4.6, 0.36], [2.3, 0.85]].forEach(function (l) {
-      arms.forEach(function (d) {
-        paths += '<path d="' + d + '" stroke-width="' + l[0] + '" opacity="' + l[1] + '"/>';
-      });
-    });
-    return '<div class="storm-head"><svg class="sh-swirl" viewBox="-24 -24 48 48" aria-hidden="true">' +
-      '<circle class="sh-glow3" r="16"/><circle class="sh-glow2" r="11"/><circle class="sh-glow1" r="7"/>' +
-      '<g fill="none" stroke="#EAF6FF" stroke-linecap="round" stroke-linejoin="round">' + paths + '</g>' +
-      '<circle fill="#F2FAFF" opacity=".95" r="4.6"/>' +
-      '<circle class="sh-eye" r="1.8"/></svg></div>';
+    function layered(d, ws) {
+      return ws.map(function (l) {
+        return '<path d="' + d + '" stroke-width="' + l[0] + '" opacity="' + l[1] + '"/>';
+      }).join('');
+    }
+    var innerP = [arm(0, 3.8, 0.34, 3.4), arm(Math.PI, 3.8, 0.34, 3.4)].map(function (d) {
+      return layered(d, [[6.5, 0.18], [4, 0.4], [2.2, 0.9]]);
+    }).join('');
+    var outerP = [arm(1.3, 6.8, 0.3, 3.2), arm(1.3 + Math.PI, 6.8, 0.3, 3.2)].map(function (d) {
+      return layered(d, [[5.5, 0.14], [3, 0.3], [1.6, 0.62]]);
+    }).join('');
+    // Each deck is its own stacked <svg> layer: rotating a whole <svg> element
+    // spins about its center in every browser, whereas rotating inner SVG
+    // groups hits inconsistent transform-origin handling (arms orbiting off-
+    // center instead of spinning in place).
+    function lyr(cls, body) {
+      return '<svg class="sh-lyr ' + cls + '" viewBox="-26 -26 52 52" aria-hidden="true">' + body + '</svg>';
+    }
+    return '<div class="storm-head">' +
+      lyr('', '<circle class="sh-glow3" r="17"/><circle class="sh-glow2" r="12"/><circle class="sh-glow1" r="7.5"/>') +
+      lyr('sh-outer', '<g fill="none" stroke="#DDEFFC" stroke-linecap="round" stroke-linejoin="round">' + outerP + '</g>') +
+      lyr('sh-inner', '<g fill="none" stroke="#EAF6FF" stroke-linecap="round" stroke-linejoin="round">' + innerP + '</g>') +
+      lyr('', '<circle class="sh-cdo" fill="#F4FBFF" r="4.8"/><circle class="sh-eye" r="1.9"/>') +
+      '</div>';
   })();
   function makeStormHead(p) {
     var mk = L.marker([p.lat, p.lon], {
-      icon: L.divIcon({ className: '', iconSize: [48, 48], iconAnchor: [24, 24], html: STORM_HEAD_HTML }),
+      icon: L.divIcon({ className: '', iconSize: [52, 52], iconAnchor: [26, 26], html: STORM_HEAD_HTML }),
       interactive: false, keyboard: false,
     }).addTo(trackLayer);
     mk._el = mk.getElement() && mk.getElement().firstChild;   // the .storm-head div
@@ -607,9 +623,13 @@
   }
   function styleStormHead(mk, v) {
     var el = mk._el; if (!el) return;
+    var org = Math.max(0, Math.min(1, (v - 25) / 85));   // 0 = ragged TD, 1 = buzz-saw major
+    var spin = Math.max(0.9, 7 - v / 24);
     el.style.color = colorForV(v);
     el.style.transform = 'scale(' + (0.5 + v / 140).toFixed(3) + ')';
-    el.style.setProperty('--spin', Math.max(0.9, 7 - v / 24).toFixed(2) + 's');
+    el.style.setProperty('--spin', spin.toFixed(2) + 's');
+    el.style.setProperty('--spin-o', (spin * 2.1).toFixed(2) + 's');   // outer bands lag the core
+    el.style.setProperty('--org', org.toFixed(2));
     el.classList.toggle('has-eye', v >= 64);   // the eye clears at hurricane strength
   }
 
@@ -661,12 +681,8 @@
     var head = makeStormHead(pts[0]);
     var pen = trackPen();
     var lastCat = catStep(pts[0].v);
-    // Reset the evolving overlays + clock to the start time, and hand the
-    // particle layer the storm so the flow spirals into it as it spins up.
-    if (flowLayer && map.hasLayer(flowLayer)) {
-      flowLayer.setTime(env.startDayIdx);
-      flowLayer.setStorm({ lat: pts[0].lat, lon: pts[0].lon, v: pts[0].v });
-    }
+    // Reset the evolving overlays + clock to the start time.
+    if (flowLayer && map.hasLayer(flowLayer)) flowLayer.setTime(env.startDayIdx);
     if (shearLayer) shearLayer.setTime(env.startDayIdx);
     updateClock(0);
     setChartCursor(0);
@@ -690,10 +706,7 @@
       updateClock(p.hr);
       setChartCursor(p.hr);
       if (animHook) animHook(p.hr, p.v);   // tutorial caption driver
-      if (flowLayer && map.hasLayer(flowLayer)) {
-        flowLayer.setTime(env.startDayIdx + p.hr / 24);
-        flowLayer.setStorm({ lat: p.lat, lon: p.lon, v: p.v });
-      }
+      if (flowLayer && map.hasLayer(flowLayer)) flowLayer.setTime(env.startDayIdx + p.hr / 24);
       if (shearLayer && p.hr - lastShearHr >= SHEAR_REBUILD_HR) {
         lastShearHr = p.hr; shearLayer.setTime(env.startDayIdx + p.hr / 24);
       }
@@ -711,7 +724,6 @@
         }
       }
       if (simHr < maxHr) { requestAnimationFrame(frame); return; }
-      if (flowLayer) flowLayer.setStorm(null);   // dissipated — release the vortex
       if (window.Sheet && Sheet.active()) Sheet.raiseIfUntouched('half');   // bring the verdict back up
       if (follow && !userPanned) {
         // Pull back to the whole journey once it finishes playing.
@@ -1172,7 +1184,6 @@
     env = null; seeds = []; results = null; chosenIdx = -1; viewIdx = -1;
     stormCardP = null; gameCardP = null;            // stale share cards die with the round
     animToken++;                                    // stop any running animation
-    if (flowLayer) flowLayer.setStorm(null);        // no storm — no vortex in the flow
     if (seedLayer) seedLayer.clearLayers();
     if (trackLayer) trackLayer.clearLayers();
     // Detach the heat fields (rebuilt for the new month by renderShear/renderMpi).
@@ -1247,10 +1258,7 @@
     var p = pts[Math.min(pts.length - 1, end - 1)];
     var dayF = env.startDayIdx + p.hr / 24;
     if (shearLayer && b.field === 'shear') shearLayer.setTime(dayF);   // field AT this time (blue→red)
-    if (flowLayer && map.hasLayer(flowLayer)) {
-      flowLayer.setTime(dayF);
-      flowLayer.setStorm({ lat: p.lat, lon: p.lon, v: p.v });   // flow spirals into the frozen storm
-    }
+    if (flowLayer && map.hasLayer(flowLayer)) flowLayer.setTime(dayF);
     trackLayer.clearLayers();
     var pen = trackPen();
     for (var s = 1; s < end; s++) pen(pts[s - 1], pts[s]);
@@ -1269,6 +1277,7 @@
   function tutBack() { if (tutStep > 0) { tutStep--; tutShowStep(); } }
 
   function runTutorial() {
+    stopAttract();                 // entering from the intro: clear the preview caption + rings
     tutorialActive = true; tutStep = 0;
     var basin = BASINS[TUT_SCN.b];
     game = { round: 0, total: 0, totalAce: 0, rows: [], mode: basin.key, objective: 'ace' };

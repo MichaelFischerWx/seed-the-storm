@@ -22,28 +22,14 @@
   var FRAME_MS = 30;       // ~30 fps cap
   var DEG2RAD = Math.PI / 180;
 
-  // Storm vortex blended into the ambient flow while a storm animates (set via
-  // setStorm): a modified-Rankine tangential wind + ~24° inflow, so particles
-  // visibly wrap into and spiral around the cyclone as it intensifies. The
-  // influence radius grows with intensity — a depression stirs a small eddy,
-  // a major hurricane organizes the whole neighbourhood.
-  var VORTEX_RMW = 0.5;    // deg — radius of maximum wind
-  var VORTEX_DECAY = 0.65; // outer-profile exponent: vt ~ (rmw/r)^decay
-  var VORTEX_VCAP = 22;    // m/s advection cap (full speed would overshoot at 30 fps)
-  var EYE_R = 0.22;        // deg — particles reaching the eye respawn elsewhere
-  var INFLOW_COS = 0.91, INFLOW_SIN = 0.42;   // ~24° inward-spiral angle
-
   var ParticleLayer = L.Layer.extend({
     initialize: function () {
       this._env = null; this._t = 0; this._raf = null;
       this._running = false; this._lastMs = 0;
-      this._storm = null; this._N = 0;
+      this._N = 0;
     },
     setField: function (env) { this._env = env; return this; },
     setTime: function (t) { this._t = t; return this; },
-    // storm = {lat, lon, v(kt)} or null. Weak disturbances barely swirl;
-    // ignore below ~20 kt so the pick-stage flow stays purely ambient.
-    setStorm: function (s) { this._storm = (s && s.v > 20) ? s : null; return this; },
 
     onAdd: function (map) {
       this._map = map;
@@ -177,40 +163,16 @@
       ctx.globalCompositeOperation = 'source-over';
       ctx.lineCap = 'round';
 
-      var st = this._storm, stCos = 0, stVm = 0, stR = 0;
-      if (st) {
-        stCos = Math.cos(st.lat * DEG2RAD);
-        stVm = Math.min(st.v, 120) * 0.5144;             // kt -> m/s, capped
-        stR = 2.2 + 4.5 * Math.min(1, st.v / 110);       // influence radius (deg)
-      }
-
       for (var i = 0; i < this._N; i++) {
         var age = p.age[i];
         if (age >= p.life[i]) { this._spawn(i); continue; }
         var lat = p.lat[i], lon = p.lon[i];
         var uv = Model.ambientUV(this._env, this._t, lat, lon);
         if (!uv) { this._spawn(i); continue; }
-        var u = uv.u, v = uv.v;
-        // Blend in the storm's vortex: tangential (CCW, Northern Hemisphere)
-        // + inflow, tapering to zero at the outer radius.
-        if (st) {
-          var dx = (lon - st.lon) * stCos, dy = lat - st.lat;
-          var r = Math.sqrt(dx * dx + dy * dy);
-          if (r < EYE_R) { this._spawn(i); continue; }   // spiralled into the eye
-          if (r < stR) {
-            var vt = r < VORTEX_RMW ? stVm * (r / VORTEX_RMW)
-                                    : stVm * Math.pow(VORTEX_RMW / r, VORTEX_DECAY);
-            vt *= Math.min(1, (stR - r) / 1.5);
-            if (vt > VORTEX_VCAP) vt = VORTEX_VCAP;
-            var rx = dx / r, ry = dy / r;
-            u += vt * (-ry * INFLOW_COS - rx * INFLOW_SIN);
-            v += vt * (rx * INFLOW_COS - ry * INFLOW_SIN);
-          }
-        }
-        var spd = Math.sqrt(u * u + v * v);
+        var spd = Math.sqrt(uv.u * uv.u + uv.v * uv.v);
         if (spd < MIN_MS) { this._spawn(i); continue; }
         var cosl = Math.cos(lat * DEG2RAD); if (cosl < 0.05) cosl = 0.05;
-        var nlat = lat + v * STEP_DEG, nlon = lon + (u / cosl) * STEP_DEG;
+        var nlat = lat + uv.v * STEP_DEG, nlon = lon + (uv.u / cosl) * STEP_DEG;
         if (nlat > b.getNorth() + 1 || nlat < b.getSouth() - 1 ||
             nlon > b.getEast() + 1 || nlon < b.getWest() - 1) { this._spawn(i); continue; }
 
