@@ -467,8 +467,8 @@ svg.ic, .brand-mark, .btn-ic, .v-ic { display: inline-block; fill: none; }
 .storm-head.has-eye .sh-eye { opacity: 1; }
 @keyframes shspin { to { transform: rotate(-360deg); } }   /* counterclockwise (NH) */
 
-/* shaded environment field canvases crossfade between re-shades */
-.leaflet-field-canvas { transition: opacity .55s linear; }
+/* shaded environment field canvases: opacity is driven per-frame by the
+   two-day blend in fields.js — no CSS transition (it would lag the blend) */
 
 /* expanding ring when the storm jumps a category */
 .cat-pulse { display: block; width: 12px; height: 12px; border-radius: 50%;

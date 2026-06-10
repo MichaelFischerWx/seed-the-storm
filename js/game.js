@@ -399,13 +399,14 @@
     return mpiLayer;
   }
 
-  // Diverging shear ramp (kt): azure → teal (favorable) through a DARK slate
-  // neutral at 20 kt → amber → crimson (hostile). The dark midpoint recedes
-  // into the basemap so the extremes pop; the old light-gray middle read as a
-  // milky wash over the dark map.
+  // Shear ramp (kt): Spectral_r (ColorBrewer Spectral, reversed) mapped over
+  // 0–40 kt — blue/purple favorable through yellow to deep red hostile, the
+  // classic met-analysis shear palette.
   var _SHEAR_STOPS = [
-    [0, [56, 142, 231]], [10, [45, 189, 160]], [20, [62, 76, 92]],
-    [30, [233, 125, 64]], [40, [225, 49, 89]],
+    [0, [94, 79, 162]], [4, [50, 136, 189]], [8, [102, 194, 165]],
+    [12, [171, 221, 164]], [16, [230, 245, 152]], [20, [255, 255, 191]],
+    [24, [254, 224, 139]], [28, [253, 174, 97]], [32, [244, 109, 67]],
+    [36, [213, 62, 79]], [40, [158, 1, 66]],
   ];
   function lerp(a, b, t) { return [Math.round(a[0] + (b[0] - a[0]) * t), Math.round(a[1] + (b[1] - a[1]) * t), Math.round(a[2] + (b[2] - a[2]) * t)]; }
   function rampColor(stops, x) {
@@ -420,7 +421,7 @@
   }
   // Shear: diverging "favorability" ramp — blue (favorable) below 20 kt, red
   // (hostile) above. Red = hostile shear.
-  var FAV_GRAD = 'linear-gradient(to right, rgb(56,142,231), rgb(45,189,160), rgb(62,76,92), rgb(233,125,64), rgb(225,49,89))';
+  var FAV_GRAD = 'linear-gradient(to right, #5e4fa2, #3288bd, #66c2a5, #abdda4, #e6f598, #ffffbf, #fee08b, #fdae61, #f46d43, #d53e4f, #9e0142)';
   function favColor(hostility) { var c = rampColor(_SHEAR_STOPS, Math.max(0, Math.min(1, hostility)) * 40); return [c[0], c[1], c[2], 255]; }
   function shearShade(kt) { if (!isFinite(kt)) return [0, 0, 0, 0]; return favColor(kt / 40); }
 
@@ -564,7 +565,6 @@
 
   var HRS_PER_FRAME = 0.7;   // ~1 day per ~1.1 s at 30 fps
   var FRAME_MS = 33;
-  var SHEAR_REBUILD_HR = 12; // re-shade shear every 12 sim-hours
   var animHook = null;       // optional per-frame callback(hr, v) — drives the tutorial captions
   var tutorialActive = false;
   var TUTORIAL_HRS_PER_FRAME = 0.32;   // slower so the demo's captions are readable (~15 s)
@@ -687,7 +687,7 @@
     updateClock(0);
     setChartCursor(0);
 
-    var maxHr = pts[pts.length - 1].hr, simHr = 0, drawn = 1, lastMs = 0, lastShearHr = 0;
+    var maxHr = pts[pts.length - 1].hr, simHr = 0, drawn = 1, lastMs = 0;
     function frame(ts) {
       if (token !== animToken) return;       // a newer animation took over
       if (ts - lastMs < FRAME_MS) { requestAnimationFrame(frame); return; }
@@ -707,9 +707,9 @@
       setChartCursor(p.hr);
       if (animHook) animHook(p.hr, p.v);   // tutorial caption driver
       if (flowLayer && map.hasLayer(flowLayer)) flowLayer.setTime(env.startDayIdx + p.hr / 24);
-      if (shearLayer && p.hr - lastShearHr >= SHEAR_REBUILD_HR) {
-        lastShearHr = p.hr; shearLayer.setTime(env.startDayIdx + p.hr / 24);
-      }
+      // Continuous: pixels re-render only on day boundaries; in between this
+      // just nudges the two day-canvases' blend weights (see fields.js).
+      if (shearLayer) shearLayer.setTime(env.startDayIdx + p.hr / 24);
       // Smoothly keep the storm in view: only glide-recentre (animated pan)
       // when it drifts into the outer 30% of the frame. Far fewer pans than a
       // per-frame nudge, so the motion reads as one smooth camera move AND the
