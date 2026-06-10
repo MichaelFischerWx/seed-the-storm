@@ -60,6 +60,39 @@
   var V_DEAD = 15;             // dissipation threshold once weakening
   var ACE_MIN = 34;            // kt; tropical-storm threshold for ACE
 
+  // --- Inner-core land fraction ---------------------------------------------
+  // Land decay is driven by the fraction of the storm's INNER CORE over land,
+  // not the single centre point. Sampling only the centre made tiny islands
+  // (the Lesser Antilles, the Bahamas) read land-fraction ~1 and shred a storm
+  // that in reality barely notices them, because the island is a small part of
+  // the circulation. Averaging over a ~0.9° core disk makes the weakening scale
+  // with island SIZE: a small island is a sliver of the disk (little decay); a
+  // large island (Cuba, Hispaniola) fills it (real decay) — matching observed
+  // behaviour. The disk is sampled at the centre + two area-weighted rings.
+  var CORE_R = 0.9;            // deg; inner-core averaging radius (~100 km)
+  var _CORE_OFF = (function () {
+    var pts = [{ dx: 0, dy: 0, w: 1 }];       // centre
+    [[0.5, 0.6], [1.0, 1.0]].forEach(function (ring) {   // [radius frac, per-point weight]
+      var rr = ring[0] * CORE_R;
+      for (var k = 0; k < 8; k++) {
+        var a = k / 8 * 2 * Math.PI;
+        pts.push({ dx: rr * Math.cos(a), dy: rr * Math.sin(a), w: ring[1] });
+      }
+    });
+    return pts;
+  })();
+  function coreLandFrac(env, lat, lon) {
+    if (!env.landmask) return 0;
+    var cosl = Math.cos(lat * DEG2RAD); if (cosl < 0.2) cosl = 0.2;
+    var sum = 0, wsum = 0;
+    for (var i = 0; i < _CORE_OFF.length; i++) {
+      var o = _CORE_OFF[i];
+      var v = ERA5.bilinear(env.landmask.values, env.landmask.grid, lat + o.dy, lon + o.dx / cosl);
+      if (isFinite(v)) { sum += o.w * (v < 0 ? 0 : v > 1 ? 1 : v); wsum += o.w; }
+    }
+    return wsum ? sum / wsum : 0;
+  }
+
   // Steering velocity (m/s) at a point/time, beta drift included. null if off-grid.
   function steeringAt(env, dayFloat, lat, lon) {
     var u = ERA5.sampleTime(env.steeru, dayFloat, lat, lon);
@@ -148,12 +181,9 @@
       // NaN over land/cold → treat as 0 (drives the decay branch).
       var mpiKt = env.mpi ? ERA5.bilinear(env.mpi.values, env.mpi.grid, lat, lon) : (MPI.atPoint(env.sst, lat, lon).mpi);
       if (!isFinite(mpiKt)) mpiKt = 0;
-      // Land fraction from the high-res (0.1°) mask if present.
-      var lf = 0;
-      if (env.landmask) {
-        lf = ERA5.bilinear(env.landmask.values, env.landmask.grid, lat, lon);
-        lf = isFinite(lf) ? Math.max(0, Math.min(1, lf)) : 0;
-      }
+      // Inner-core land fraction (area-averaged, not a centre point sample) so
+      // weakening scales with island size — tiny islands barely dent intensity.
+      var lf = coreLandFrac(env, lat, lon);
       var onLand = lf >= 0.5;
       maxShear = Math.max(maxShear, shear);
 
