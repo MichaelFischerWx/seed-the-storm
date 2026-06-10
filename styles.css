@@ -447,25 +447,25 @@ svg.ic, .brand-mark, .btn-ic, .v-ic { display: inline-block; fill: none; }
 .track-tip { font-size: 12px; }
 
 /* animated storm head: an evolving synthetic cloud system over a category-
-   coloured glow. Two decks spin at different speeds (--spin core, --spin-o
-   bands); --org (0 ragged TD → 1 buzz-saw major) drives how organized the
-   clouds look; the eye clears at hurricane strength. */
+   coloured glow. Two decks spin CCW at different speeds (angle integrated in
+   JS, rate ∝ intensity); --org (0 ragged TD → 1 buzz-saw major) drives how
+   organized the clouds look; the eye clears at hurricane strength. */
 .storm-head { position: relative; width: 52px; height: 52px; pointer-events: none;
   transition: transform .6s ease, color .5s linear; will-change: transform;
   filter: drop-shadow(0 0 6px currentColor); }
 .sh-lyr { position: absolute; inset: 0; width: 100%; height: 100%;
   overflow: visible; color: inherit; }
-.sh-inner { animation: shspin var(--spin, 3s) linear infinite;
-  opacity: calc(.55 + .45 * var(--org, 0)); }
-.sh-outer { animation: shspin var(--spin-o, 6.5s) linear infinite;
-  opacity: calc(.3 + .7 * var(--org, 0)); }
+/* deck rotation is integrated in JS (game.js spinLoop) — always CCW, rate
+   scales with intensity; CSS animation here would have its phase reset every
+   time the speed changed */
+.sh-inner { opacity: calc(.55 + .45 * var(--org, 0)); }
+.sh-outer { opacity: calc(.3 + .7 * var(--org, 0)); }
 .sh-cdo { opacity: calc(.3 + .65 * var(--org, 0)); transition: opacity .5s; }
 .sh-glow1 { fill: currentColor; opacity: calc(.32 + .28 * var(--org, 0)); }
 .sh-glow2 { fill: currentColor; opacity: calc(.16 + .14 * var(--org, 0)); }
 .sh-glow3 { fill: currentColor; opacity: calc(.07 + .07 * var(--org, 0)); }
 .sh-eye { fill: #0a1c17; opacity: 0; transition: opacity .5s; }
 .storm-head.has-eye .sh-eye { opacity: 1; }
-@keyframes shspin { to { transform: rotate(-360deg); } }   /* counterclockwise (NH) */
 
 /* shaded environment field canvases: opacity is driven per-frame by the
    two-day blend in fields.js — no CSS transition (it would lag the blend) */

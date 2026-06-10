@@ -612,23 +612,45 @@
       lyr('', '<circle class="sh-cdo" fill="#F4FBFF" r="4.8"/><circle class="sh-eye" r="1.9"/>') +
       '</div>';
   })();
+  // The decks rotate via a per-marker rAF loop that INTEGRATES the angle in
+  // JS — strictly monotonic, always counterclockwise, rate scaling smoothly
+  // with intensity. (A CSS animation whose duration is rewritten every frame
+  // has its phase recomputed each time, so the deck jumped to a new angle per
+  // frame — wagon-wheel aliasing that could read as spinning clockwise.)
+  function spinLoop(mk) {
+    var el = mk._el;
+    if (!el || !el.isConnected) return;               // marker removed — stop
+    var now = performance.now();
+    var dt = Math.min(100, now - (mk._ts || now));    // clamp tab-sleep gaps
+    mk._ts = now;
+    var rate = 360 / Math.max(0.9, 7 - mk._v / 24);   // deg/s, faster when stronger
+    mk._angI = (mk._angI || 0) - rate * dt / 1000;          // negative = CCW (NH)
+    mk._angO = (mk._angO || 0) - rate * 0.48 * dt / 1000;   // outer bands lag the core
+    mk._inner.style.transform = 'rotate(' + (mk._angI % 360).toFixed(2) + 'deg)';
+    mk._outer.style.transform = 'rotate(' + (mk._angO % 360).toFixed(2) + 'deg)';
+    requestAnimationFrame(function () { spinLoop(mk); });
+  }
   function makeStormHead(p) {
     var mk = L.marker([p.lat, p.lon], {
       icon: L.divIcon({ className: '', iconSize: [52, 52], iconAnchor: [26, 26], html: STORM_HEAD_HTML }),
       interactive: false, keyboard: false,
     }).addTo(trackLayer);
-    mk._el = mk.getElement() && mk.getElement().firstChild;   // the .storm-head div
+    var el = mk.getElement() && mk.getElement().firstChild;   // the .storm-head div
+    mk._el = el;
+    if (el) {
+      mk._inner = el.querySelector('.sh-inner');
+      mk._outer = el.querySelector('.sh-outer');
+    }
     styleStormHead(mk, p.v);
+    if (mk._inner) spinLoop(mk);
     return mk;
   }
   function styleStormHead(mk, v) {
     var el = mk._el; if (!el) return;
     var org = Math.max(0, Math.min(1, (v - 25) / 85));   // 0 = ragged TD, 1 = buzz-saw major
-    var spin = Math.max(0.9, 7 - v / 24);
+    mk._v = v;                                           // spinLoop reads the current rate
     el.style.color = colorForV(v);
     el.style.transform = 'scale(' + (0.5 + v / 140).toFixed(3) + ')';
-    el.style.setProperty('--spin', spin.toFixed(2) + 's');
-    el.style.setProperty('--spin-o', (spin * 2.1).toFixed(2) + 's');   // outer bands lag the core
     el.style.setProperty('--org', org.toFixed(2));
     el.classList.toggle('has-eye', v >= 64);   // the eye clears at hurricane strength
   }
