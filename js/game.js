@@ -58,22 +58,13 @@
     // The valid-time clock belongs to the live map stages only.
     var clk = $('map-clock');
     if (clk) clk.classList.toggle('hidden', !(name === 'pick' || name === 'result'));
-    // Mobile bottom sheet: each stage has a natural height — reading/picking
-    // wants content, playback wants the map, the summary wants the whole list.
-    if (window.Sheet && Sheet.active()) {
-      var snap = { intro: 'half', pick: 'half', result: 'peek', summary: 'full' }[name];
-      if (snap) Sheet.set(snap);
-    }
+    // The panel scrolls to its top on every stage change so the headline of the
+    // new stage (verdict, "Choose your seed", final results) is what you land on.
+    var panel = $('panel'); if (panel) panel.scrollTop = 0;
   }
-  function sheetPx() { return (window.Sheet && Sheet.active()) ? Sheet.visiblePx() : 0; }
-  // Centre a programmatic view on the VISIBLE map — the strip above the mobile
-  // bottom sheet. A plain setView centres in the full container, which shoves
-  // the intended view up toward high latitudes whenever the sheet is up.
-  function viewWithSheet(center, zoom) {
-    map.setView(center, zoom, { animate: false });
-    var s = sheetPx();
-    if (s) map.panBy([0, Math.round(s / 2)], { animate: false });
-  }
+  // Mobile stacks map-over-panel: the map is a fixed-height box, so a
+  // programmatic view just centres normally (no sheet offset to compensate).
+  function setMapView(center, zoom) { map.setView(center, zoom, { animate: false }); }
 
   // Valid-time clock: deal date + `hr` hours into the integration.
   function updateClock(hr) {
@@ -103,26 +94,17 @@
   }
 
   // ---- map ----
-  // South edge of the pannable band. Desktop: a bit below the 0°N data band so
-  // deep-tropics seeds frame clear of the legend. Phones: much further south —
-  // the bottom sheet covers the lower part of the full-bleed map, and with a
-  // tall viewport the tight bounds clamp froze vertical panning, pinning the
-  // visible strip (above the sheet) to high latitudes.
-  function southBound() { return window.matchMedia('(max-width: 820px)').matches ? -45 : -12; }
   function initMap() {
     // Lock the view to the data band (0–60 °N, all lon) so the field always
     // fills the frame and the edges read as the map's frame, not missing data.
+    // South edge sits a bit below 0°N so a deep-tropics seed frames clear of
+    // the legend without the bounds clamp shoving it back north.
     map = L.map('map', {
       // minZoom 3 lets the pick-stage fitBounds zoom out far enough to frame all
       // four seeds even when they're spread wide across a basin on a narrow phone.
       worldCopyJump: false, minZoom: 3, maxZoom: 8, zoomSnap: 0.5, zoomDelta: 0.5,
-      maxBounds: [[southBound(), -180], [60, 180]], maxBoundsViscosity: 1.0,
+      maxBounds: [[-12, -180], [60, 180]], maxBoundsViscosity: 1.0,
     }).setView([26, -52], 4.5);
-    window.addEventListener('resize', function () {
-      map.setMaxBounds([[southBound(), -180], [60, 180]]);   // crossing the mobile breakpoint
-    });
-    // Land the home view in the strip the sheet leaves visible.
-    if (window.Sheet && Sheet.active()) map.panBy([0, Math.round(Sheet.visiblePx() / 2)], { animate: false });
     map.attributionControl.setPrefix(false);   // drop the "Leaflet" + flag prefix
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
       attribution: '&copy; OSM &middot; CARTO &middot; ERA5/TC-ATLAS',
@@ -216,7 +198,7 @@
       var startDayIdx = day - 1;
       dealDate = { year: year, month: month, day: day, basin: basin.key };
       elDealDate.textContent = MONTH_NAMES[month] + ' ' + day + ', ' + year;
-      if (basin.view) viewWithSheet(basin.view.center, basin.view.zoom);
+      if (basin.view) setMapView(basin.view.center, basin.view.zoom);
 
       // Reuse the env assembled during the prefetch if we have it (a failed
       // prefetch falls back to a fresh, retrying load); otherwise load now.
@@ -330,15 +312,15 @@
       m.on('click', function () { if (results) viewSeed(i); else selectSeed(i); });
       seedMarkers.push(m);
     });
-    // Frame ALL seeds with comfortable margins. Reserve the top for the clock
-    // and the bottom for the field legend (~90 px, bottom-left) — plus, on
-    // mobile, the bottom sheet — so no seed hides behind chrome.
+    // Frame ALL seeds with comfortable margins: reserve the top for the clock
+    // and the bottom for the field legend (~90 px tall, bottom-left) so no seed
+    // hides behind chrome. The map is its own fixed box now, so this is the
+    // only padding to account for.
     var grp = L.featureGroup(seedMarkers);
     if (seedMarkers.length) {
-      var pb = Math.min(map.getSize().y * 0.6, sheetPx() ? sheetPx() + 100 : 100);
       map.fitBounds(grp.getBounds().pad(0.12), {
         animate: false, maxZoom: 5,
-        paddingTopLeft: [24, 46], paddingBottomRight: [24, pb],
+        paddingTopLeft: [24, 46], paddingBottomRight: [24, 104],
       });
     }
   }
@@ -758,9 +740,6 @@
     viewIdx = i;                             // this seed is now the one being visualised
     trackLayer.clearLayers();
     results.forEach(function (r, k) { if (k !== i) drawTrackPolyline(k, null, true); });
-    // Playback is a map moment: drop the mobile sheet to a peek so the storm
-    // has the screen (it pops back up when the run finishes).
-    if (window.Sheet && Sheet.active()) Sheet.set('peek');
 
     // Follow the storm on small/narrow maps (mobile), where it otherwise drifts
     // off-screen; on wide desktop maps the whole field is visible, so following
@@ -808,24 +787,17 @@
       // constantly — both causes of the old jumpiness.
       if (follow && !userPanned && ts - lastPanMs > 850) {
         var cp = map.latLngToContainerPoint([p.lat, p.lon]), sz = map.getSize();
-        // Keep the storm inside the VISIBLE strip (the sheet hides the bottom
-        // sv px) and recentre it on that strip, not the full container.
-        var sv = sheetPx(), Hv = sz.y - sv;
-        var mx = sz.x * 0.30, my = Hv * 0.30;
-        if (cp.x < mx || cp.x > sz.x - mx || cp.y < my || cp.y > Hv - my) {
+        var mx = sz.x * 0.30, my = sz.y * 0.30;
+        if (cp.x < mx || cp.x > sz.x - mx || cp.y < my || cp.y > sz.y - my) {
           lastPanMs = ts;
-          var tgt = sv ? map.unproject(map.project([p.lat, p.lon]).add(L.point(0, sv / 2)))
-                       : L.latLng(p.lat, p.lon);
-          map.panTo(tgt, { animate: true, duration: 0.9, easeLinearity: 0.4 });
+          map.panTo([p.lat, p.lon], { animate: true, duration: 0.9, easeLinearity: 0.4 });
         }
       }
       if (simHr < maxHr) { requestAnimationFrame(frame); return; }
-      if (window.Sheet && Sheet.active()) Sheet.raiseIfUntouched('half');   // bring the verdict back up
       if (follow && !userPanned) {
         // Pull back to the whole journey once it finishes playing.
         var b = L.latLngBounds(pts.map(function (q) { return [q.lat, q.lon]; }));
-        map.fitBounds(b.pad(0.3), { animate: true, maxZoom: 6,
-          paddingBottomRight: [0, Math.min(map.getSize().y * 0.5, sheetPx())] });
+        map.fitBounds(b.pad(0.3), { animate: true, maxZoom: 6 });
       }
     }
     requestAnimationFrame(frame);
@@ -1409,7 +1381,7 @@
       results = Model.runSeeds(env, seeds);
       dealDate = { year: TUT_SCN.y, month: TUT_SCN.m, day: TUT_SCN.d, basin: basin.key };
       if (seedLayer) seedLayer.clearLayers();
-      if (basin.view) viewWithSheet(basin.view.center, basin.view.zoom);
+      if (basin.view) setMapView(basin.view.center, basin.view.zoom);
       $('tog-flow').checked = true; renderFlow();
       tutStep = 0; tutShowStep();
     }).catch(function (err) { console.error(err); endTutorial(); });
@@ -1792,7 +1764,7 @@
     status('Loading shared storm…');
     dealDate = { year: p.y, month: p.m, day: p.d, basin: basin.key };
     elDealDate.textContent = MONTH_NAMES[p.m] + ' ' + p.d + ', ' + p.y;
-    if (basin.view) viewWithSheet(basin.view.center, basin.view.zoom);
+    if (basin.view) setMapView(basin.view.center, basin.view.zoom);
     loadEnv(basin.key, p.y, p.m, p.d - 1).then(function (e) {
       env = e;
       seeds = [{ lat: p.la, lon: p.lo }];

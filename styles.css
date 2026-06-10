@@ -84,7 +84,10 @@ svg.ic, .brand-mark, .btn-ic, .v-ic { display: inline-block; fill: none; }
 
 /* ---- Layout ---- */
 #main { flex: 1; display: flex; min-height: 0; position: relative; }
-#map { flex: 1; background: #061612; }
+/* position:relative so the in-map overlays (clock, legend, attract caption)
+   anchor to the MAP box — critical on mobile where #main stacks map-over-panel
+   and anchoring to #main would drop the legend onto the panel. */
+#map { flex: 1; background: #061612; position: relative; }
 #panel {
   width: 384px; flex: none; overflow-y: auto;
   background: var(--surface); border-left: 1px solid var(--line); padding: 20px;
@@ -496,29 +499,17 @@ svg.ic, .brand-mark, .btn-ic, .v-ic { display: inline-block; fill: none; }
 #panel::-webkit-scrollbar-thumb { background: #215946; border-radius: 999px; border: 2px solid var(--surface); }
 #panel::-webkit-scrollbar-track { background: transparent; }
 
-/* mobile bottom-sheet grab handle (js/sheet.js); display:flex only ≤820px */
-.sheet-handle { display: none; align-items: center; justify-content: center;
-  height: 26px; margin: -12px -20px 4px; cursor: grab; touch-action: none; }
-.sheet-handle .sh-pill { width: 44px; height: 5px; border-radius: 999px;
-  background: var(--line-bright); opacity: .9; }
-
 @media (max-width: 820px) {
-  /* The map fills the play area; the panel becomes a draggable bottom sheet
-     (height driven by js/sheet.js; --sheet-h on #main lifts map overlays). */
-  #map { position: absolute; inset: 0; }
-  #panel { position: absolute; left: 0; right: 0; bottom: 0; z-index: 540;
-    width: auto; height: 46%; max-height: none;
-    border-left: none; border-top: 1px solid var(--line);
-    border-radius: 18px 18px 0 0;
-    box-shadow: 0 -14px 34px rgba(0,0,0,.5);
-    padding-bottom: max(20px, env(safe-area-inset-bottom)); }
-  #panel.sheet-anim { transition: height .26s cubic-bezier(.3, .9, .3, 1); }
-  #panel.sheet-peek { overflow-y: hidden; }
-  .sheet-handle { display: flex; }
-  /* float map chrome above the sheet */
-  .map-legend { bottom: calc(var(--sheet-h, 0px) + 10px); transition: bottom .26s cubic-bezier(.3,.9,.3,1); }
-  .attract-cap { bottom: calc(var(--sheet-h, 0px) + 12px); }
-  .leaflet-bottom { bottom: var(--sheet-h, 0px); transition: bottom .26s cubic-bezier(.3,.9,.3,1); }
+  /* Deterministic stacked split: the map is a fixed-height box on top, the
+     panel takes the rest and scrolls. They never overlap, so the seed list and
+     chart are always laid out at a stable size and the map framing only has to
+     clear its own legend. (Replaced an overlay bottom sheet whose moving height
+     hid the seed picker, mis-sized the chart canvas, and shoved low-latitude
+     seeds out of the frame.) */
+  #main { flex-direction: column; }
+  #map { flex: 0 0 47dvh; height: 47dvh; min-height: 0; position: relative; }
+  #panel { flex: 1 1 auto; width: auto; min-height: 0; max-height: none;
+    border-left: none; border-top: 1px solid var(--line); }
 }
 
 /* phones: condense the topbar so nothing wraps, and tighten map overlays */
@@ -540,14 +531,13 @@ svg.ic, .brand-mark, .btn-ic, .v-ic { display: inline-block; fill: none; }
   .btn { padding: 8px 11px; }
   #deal-btn { font-size: 12.5px; }
   #panel { padding: 16px; padding-bottom: max(16px, env(safe-area-inset-bottom)); }
-  .sheet-handle { margin: -8px -16px 4px; }
   .result-actions { margin: 14px -16px -16px; padding: 12px 16px calc(14px + env(safe-area-inset-bottom, 0px)); }
   /* compact, low-profile colorbar so it covers as little of the short map as possible */
-  .map-legend { width: 116px; left: 8px; bottom: calc(var(--sheet-h, 0px) + 8px); padding: 6px 8px; opacity: .92; }
+  .map-legend { width: 116px; left: 8px; bottom: 8px; padding: 6px 8px; opacity: .92; }
   .map-legend .ml-title { font-size: 9px; margin-bottom: 4px; }
   .map-legend .ml-bar { height: 7px; }
   .map-legend .ml-ticks { font-size: 8.5px; }
   .map-legend .ml-sem { font-size: 7.5px; }
-  .attract-cap { bottom: calc(var(--sheet-h, 0px) + 12px); padding: 7px 12px; font-size: 11px; max-width: 94%; }
+  .attract-cap { bottom: 12px; padding: 7px 12px; font-size: 11px; max-width: 94%; }
   .attract-cap .ac-sub { display: none; }  /* keep it to one short line on phones */
 }
