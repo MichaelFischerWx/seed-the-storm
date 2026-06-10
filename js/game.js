@@ -556,12 +556,16 @@
   function runSimulation() {
     if (chosenIdx < 0) return;
     $('run-btn').disabled = true;
-    status('Integrating storms…');
+    if (game.daily) {                       // lock in the placement
+      map.off('click', onPlaceClick);
+      if (placeMarker && placeMarker.dragging) placeMarker.dragging.disable();
+    }
+    status(game.daily ? 'Integrating your storm…' : 'Integrating storms…');
     setTimeout(function () { // let UI paint
       results = Model.runSeeds(env, seeds);
       status('');
       showStage('result');
-      revealResults();
+      (game.daily ? revealDaily : revealResults)();
       animateTrack(chosenIdx);
     }, 30);
   }
@@ -1268,6 +1272,7 @@
     stopAttract();                                  // tear down the home-screen preview
     env = null; seeds = []; results = null; chosenIdx = -1; viewIdx = -1;
     stormCardP = null; gameCardP = null;            // stale share cards die with the round
+    placeMarker = null;                             // free-placement marker dies with the round
     animToken++;                                    // stop any running animation
     if (seedLayer) seedLayer.clearLayers();
     if (trackLayer) trackLayer.clearLayers();
@@ -1296,14 +1301,229 @@
 
   // Return to the intro / basin picker and restore the live attract preview.
   function goHome() {
-    sharedMode = false;
+    sharedMode = false; dailyPractice = false;
     nextRound = null;
     if (tutorialActive) { tutorialActive = false; document.getElementById('app').classList.remove('tut-mode'); resetFieldToggles(); }
+    disarmPlacement();          // restore the classic pick-stage skin if we were in a daily
     restoreSharedUI();
     resetRound();
     $('score-badge').classList.add('hidden');
     showStage('intro');
+    updateDailyButton();
     startAttract();
+  }
+
+  // ======================= Daily Challenge ================================
+  // One global puzzle per UTC day: 3 rounds, one each over the Atlantic, East
+  // Pacific and West Pacific, with Aug/Sep/Oct rotated across the basins by a
+  // date-seeded PRNG so everyone playing on a given day gets the identical
+  // lineup. You place ONE seed yourself (tap the map) and bank the ACE it
+  // makes; the daily score is the total ACE across the three rounds. The
+  // intensity model is deterministic, so the same tap always yields the same
+  // storm — fair to compare and share.
+  var DAILY_ROUNDS = 3;
+  var DAILY_BASIN_SEQ = ['atl', 'epac', 'wpac'];   // fixed round order (stable share columns)
+  var DAILY_MONTH_POOL = [8, 9, 10];                // Aug/Sep/Oct, permuted across basins per day
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+  function hashStr(s) { var h = 2166136261 >>> 0; for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+  function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; var t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  function todayUTC() { var d = new Date(); return d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate()); }
+  // Deterministic (basin, month, year, start-day-fraction) per round for a date.
+  function dailySchedule(dateStr) {
+    var rnd = mulberry32(hashStr('seedstorm-daily-v1-' + dateStr));
+    var months = DAILY_MONTH_POOL.slice();
+    for (var i = months.length - 1; i > 0; i--) { var j = (rnd() * (i + 1)) | 0; var t = months[i]; months[i] = months[j]; months[j] = t; }
+    return DAILY_BASIN_SEQ.map(function (b, idx) {
+      return { basin: b, month: months[idx], year: YEARS[(rnd() * YEARS.length) | 0], rndDay: rnd() };
+    });
+  }
+  function dailyKey(dateStr) { return 'seedstorm_daily_' + dateStr; }
+  function loadDailyResult(dateStr) { try { var s = window.localStorage.getItem(dailyKey(dateStr)); return s ? JSON.parse(s) : null; } catch (e) { return null; } }
+  function saveDailyResult(dateStr, data) { try { window.localStorage.setItem(dailyKey(dateStr), JSON.stringify(data)); } catch (e) {} }
+
+  var dailyPractice = false;     // true while replaying after today's score is locked (unrecorded)
+  var placeMarker = null;        // the single free-placement marker
+
+  function updateDailyButton() {
+    var el = $('daily-sub'); if (!el) return;
+    el.textContent = loadDailyResult(todayUTC()) ? '· done today ✓' : '· new today';
+  }
+
+  function startDaily(opts) {
+    opts = opts || {};
+    dailyPractice = !!opts.practice;
+    nextRound = null;
+    var dateStr = todayUTC();
+    if (!dailyPractice && loadDailyResult(dateStr)) { showDailyRecap(loadDailyResult(dateStr)); return; }
+    game = { round: 1, total: 0, totalAce: 0, rows: [], mode: 'daily', objective: 'ace',
+             daily: true, dateStr: dateStr, schedule: dailySchedule(dateStr) };
+    track('daily_start', { date: dateStr, practice: dailyPractice });
+    updateScoreBadge();
+    dealDailyRound();
+  }
+
+  function dealDailyRound() {
+    status('Dealing… fetching ERA5 fields');
+    resetRound();
+    var sc = game.schedule[game.round - 1], basin = BASINS[sc.basin], month = sc.month, year = sc.year;
+    $('round-label').textContent = 'Daily · ' + game.round + ' / ' + DAILY_ROUNDS + ' · ' + MONTH_NAMES[month];
+    $('basin-name').textContent = basin.name + ' · ';
+    track('daily_round', { date: game.dateStr, basin: basin.key, month: MONTH_NAMES[month], round: game.round });
+    ERA5.loadManifest().then(function (man) {
+      var nDays = man.daily['shear/' + year + '_' + pad2(month)].nDays;
+      var day = 1 + Math.min(nDays - 1, (sc.rndDay * nDays) | 0);
+      var startDayIdx = day - 1;
+      dealDate = { year: year, month: month, day: day, basin: basin.key };
+      elDealDate.textContent = MONTH_NAMES[month] + ' ' + day + ', ' + year;
+      if (basin.view) setMapView(basin.view.center, basin.view.zoom);
+      return loadEnv(basin.key, year, month, startDayIdx).then(function (e) {
+        env = e; env.startDayIdx = startDayIdx; env.excludeEPac = !!basin.excludeEPac;
+        renderFlow(); renderShear(); renderMpi();
+        updateClock(0);
+        status('');
+        showStage('pick');
+        armPlacement();
+      });
+    }).catch(function (e) { console.error(e); status('Failed to load ERA5 data: ' + e.message, true); });
+  }
+
+  // ---- free placement (tap the map to drop one seed) ----
+  function placeIcon() {
+    return L.divIcon({ className: '', iconSize: [30, 30], iconAnchor: [15, 15],
+      html: '<div class="place-pin"><span></span></div>' });
+  }
+  function armPlacement() {
+    var h2 = stages.pick.querySelector('h2'); if (h2) h2.textContent = 'Drop your seed';
+    var muted = stages.pick.querySelector('.muted');
+    if (muted) muted.innerHTML = 'Tap warm ocean to drop your seed, then drag to fine-tune. Read the shear and ocean potential — where will it spin up the most ACE?';
+    $('seed-list').classList.add('hidden');
+    $('run-btn').textContent = 'Grow this storm';
+    $('run-btn').disabled = true;
+    chosenIdx = -1; seeds = []; placeMarker = null;
+    map.on('click', onPlaceClick);
+  }
+  function disarmPlacement() {
+    if (map) map.off('click', onPlaceClick);
+    $('seed-list').classList.remove('hidden');
+    var h2 = stages.pick.querySelector('h2'); if (h2) h2.textContent = 'Choose your seed';
+    var muted = stages.pick.querySelector('.muted');
+    if (muted) muted.innerHTML = 'Tap a pin on the map, or a seed below. Which one grows into the strongest storm?';
+    $('run-btn').textContent = 'Choose this seed';
+  }
+  function onPlaceClick(e) { setPlacement(e.latlng.lat, e.latlng.lng, false); }
+  function placeValid(lat, lon) {
+    var box = (BASINS[dealDate.basin] || BASINS.atl).box;
+    return lat >= box.latMin - 2 && lat <= box.latMax + 2 &&
+           lon >= box.lonMin - 4 && lon <= box.lonMax + 4 && isOcean(lat, lon);
+  }
+  function setPlacement(lat, lon, fromDrag) {
+    if (!placeValid(lat, lon)) {
+      $('run-btn').disabled = true;
+      showToast(isOcean(lat, lon) ? 'Drop it inside the basin' : 'Drop it over warm ocean');
+      if (!fromDrag) return;   // a bad tap just gets ignored; a bad drag leaves the marker but disables run
+    } else {
+      seeds = [{ lat: lat, lon: lon }]; chosenIdx = 0; $('run-btn').disabled = false;
+    }
+    if (!placeMarker) {
+      placeMarker = L.marker([lat, lon], { icon: placeIcon(), draggable: true });
+      placeMarker.on('dragend', function () { var ll = placeMarker.getLatLng(); setPlacement(ll.lat, ll.lng, true); });
+      placeMarker.addTo(seedLayer);
+    } else if (!fromDrag) placeMarker.setLatLng([lat, lon]);
+  }
+
+  function revealDaily() {
+    var r = results[0];
+    game.rows.push({ round: game.round, date: elDealDate.textContent, basin: dealDate.basin,
+                     month: dealDate.month, ace: r.ace, cat: r.peakCat, peakV: r.peakV,
+                     lat: seeds[0].lat, lon: seeds[0].lon });
+    game.totalAce += r.ace; game.total += r.ace;
+    updateScoreBadge();
+
+    var v = $('verdict');
+    v.className = 'verdict ' + (r.peakV >= 96 ? 'win' : r.peakV >= 64 ? 'ok' : 'miss');
+    v.innerHTML = '<svg class="v-ic"><use href="#' + (r.peakV >= 64 ? 'ic-cyclone' : 'ic-wind') + '"/></svg>';
+    var head = r.peakV >= 113 ? 'Major hurricane!' : r.peakV >= 96 ? 'A major — nicely placed!'
+             : r.peakV >= 64 ? 'A hurricane!' : r.peakV >= 34 ? 'A tropical storm.' : 'Never really organized.';
+    var sp = document.createElement('span'); sp.textContent = head; v.appendChild(sp);
+
+    $('score-line').innerHTML = 'Your seed made <b>' + r.ace.toFixed(1) + ' ACE</b> — peaked at <b>' +
+      Math.round(r.peakV) + ' kt</b> (' + catLabel(r.peakCat) + '). &nbsp;Daily total: <b>' +
+      game.totalAce.toFixed(1) + ' ACE</b>.';
+    renderClimoLine(r);
+    $('result-list').innerHTML = '';
+    $('result-hint').classList.add('hidden');
+    var cmp = $('compare'); if (cmp) { cmp.classList.add('hidden'); cmp.innerHTML = ''; }
+    $('teach').innerHTML = 'Your storm ' + describe(r) + '.';
+    $('share-storm-btn').classList.remove('hidden');
+    $('next-btn').textContent = game.round < DAILY_ROUNDS ? 'Next round →' : 'See daily results 🏆';
+    drawIntensityChart();
+    prebuildStormCard();
+  }
+
+  function showDailySummary() {
+    animToken++;
+    if (!dailyPractice) {
+      saveDailyResult(game.dateStr, {
+        dateStr: game.dateStr, totalAce: game.totalAce,
+        rows: game.rows.map(function (r) {
+          return { round: r.round, basin: r.basin, month: r.month, date: r.date, ace: r.ace, cat: r.cat, peakV: r.peakV };
+        }),
+      });
+      var pb = parseFloat(window.localStorage.getItem('seedstorm_daily_best') || '0');
+      if (game.totalAce > pb) window.localStorage.setItem('seedstorm_daily_best', game.totalAce.toFixed(1));
+    }
+    track('daily_complete', { date: game.dateStr, total_ace: Number(game.totalAce.toFixed(1)), practice: dailyPractice });
+    renderDailySummary(game.rows, game.totalAce, dailyPractice, false);
+    showStage('summary');
+  }
+  // Opening the Daily when today is already done: a read-only recap.
+  function showDailyRecap(saved) {
+    game = { round: DAILY_ROUNDS, total: saved.totalAce, totalAce: saved.totalAce, rows: saved.rows,
+             mode: 'daily', objective: 'ace', daily: true, dateStr: saved.dateStr };
+    // Light reset only — the recap is reached from the intro, so keep its live
+    // attract backdrop running (tearing it down + rebuilding raced the map size
+    // and left a degenerate field canvas). Just clear any round markers.
+    animToken++;
+    if (trackLayer) trackLayer.clearLayers();
+    if (seedLayer) seedLayer.clearLayers();
+    placeMarker = null;
+    $('score-badge').classList.add('hidden');
+    renderDailySummary(saved.rows, saved.totalAce, false, true);
+    showStage('summary');
+  }
+  function renderDailySummary(rows, totalAce, practice, recap) {
+    var h2 = stages.summary.querySelector('h2'); if (h2) h2.textContent = 'Daily Challenge';
+    var note = recap ? ' <span class="muted">· already played — new puzzle tomorrow</span>'
+                     : (practice ? ' <span class="muted">· practice</span>' : '');
+    $('summary-total').innerHTML = 'You banked <b>' + totalAce.toFixed(1) + ' ACE</b>' +
+      ' <span class="muted">· ' + (game.dateStr || todayUTC()) + '</span>' + note;
+    var ul = $('summary-list'); ul.innerHTML = '';
+    rows.forEach(function (r) {
+      var li = document.createElement('li'); li.className = 'summary-row';
+      var bn = (BASINS[r.basin] || {}).short || r.basin;
+      li.innerHTML = '<span><b>' + bn + '</b> · ' + MONTH_NAMES[r.month] + '</span>' +
+        '<span class="result-tag">' + (String(r.cat).length === 1 ? 'Cat ' : '') + r.cat + ' · ' + Math.round(r.peakV) + ' kt</span>' +
+        '<span class="sr-pts">' + r.ace.toFixed(1) + ' ACE</span>';
+      ul.appendChild(li);
+    });
+    ['lb-rank', 'lb-submit', 'lb-controls', 'lb-list'].forEach(function (id) { $(id).classList.add('hidden'); });
+    var pb = parseFloat(window.localStorage.getItem('seedstorm_daily_best') || '0');
+    $('leaderboard').classList.remove('hidden');
+    $('leaderboard').innerHTML = '<svg class="lb-ic"><use href="#ic-trophy"/></svg> Daily best: <b>' +
+      Math.max(pb, totalAce).toFixed(1) + ' ACE</b>';
+    $('share-game-btn').classList.remove('hidden');
+    $('again-btn').textContent = 'Practice again →';
+    updateDailyButton();
+  }
+  function shareDaily() {
+    var emoji = function (vv) { return vv >= 113 ? '🟥' : vv >= 96 ? '🟧' : vv >= 64 ? '🟨' : vv >= 34 ? '🟩' : '⬜'; };
+    var line = game.rows.map(function (r) { return ((BASINS[r.basin] || {}).short || r.basin) + ' ' + emoji(r.peakV); }).join('  ');
+    var txt = 'Seed the Storm — Daily ' + (game.dateStr || todayUTC()) + '\n' + line +
+      '\nTotal ' + game.totalAce.toFixed(1) + ' ACE — can you beat it?';
+    track('share', { kind: 'daily', date: game.dateStr });
+    cardOrNull(gameCardP).then(function (blob) {
+      doShare('Seed the Storm — Daily', txt, location.origin + location.pathname, blob, 'seed-the-storm-daily.png');
+    });
   }
 
   // ---- first-load tutorial -------------------------------------------------
@@ -1414,8 +1634,9 @@
 
   function nextOrFinish() {
     if (sharedMode) { goHome(); return; }           // shared storm → "Play Seed the Storm"
-    if (game.round < ROUNDS) { game.round += 1; dealRound(); }
-    else showSummary();
+    var total = game.daily ? DAILY_ROUNDS : ROUNDS;
+    if (game.round < total) { game.round += 1; (game.daily ? dealDailyRound : dealRound)(); }
+    else (game.daily ? showDailySummary : showSummary)();
   }
 
   function replayAnimation() {
@@ -1845,14 +2066,19 @@
     initMap();
     ERA5.loadClimo().then(function (c) { climo = c; });   // small JSON; powers the percentile line
     $('start-btn').addEventListener('click', startGame);   // intro -> begin the game in the chosen basin
+    $('daily-btn').addEventListener('click', function () { startDaily(); });   // intro -> today's daily challenge
     $('deal-btn').addEventListener('click', goHome);        // topbar "New game" -> back to basin pick
     $('run-btn').addEventListener('click', runSimulation);  // "Choose this seed"
     $('next-btn').addEventListener('click', nextOrFinish);  // "Next round" / "See final results"
     $('replay-btn').addEventListener('click', replayAnimation);
     $('share-storm-btn').addEventListener('click', shareStorm);   // result -> share this one storm
-    $('share-game-btn').addEventListener('click', shareGame);     // summary -> share the whole game
-    // "Play again" (or "Play your own →" after a shared-game card).
-    $('again-btn').addEventListener('click', function () { if (sharedMode) goHome(); else startGame(); });
+    $('share-game-btn').addEventListener('click', function () { (game.daily ? shareDaily : shareGame)(); });   // summary -> share
+    // "Play again": shared card → home; daily → unscored practice; classic → new game.
+    $('again-btn').addEventListener('click', function () {
+      if (sharedMode) goHome();
+      else if (game.daily) startDaily({ practice: true });
+      else startGame();
+    });
     $('lb-submit-btn').addEventListener('click', submitScore);
     $('lb-name').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); submitScore(); } });
     // tutorial controls + the intro "How it works" replay link
@@ -1900,6 +2126,7 @@
     // A #share= link opens straight into the shared storm/game. Otherwise:
     // first-ever visit → the scripted tutorial; returning visitor → the normal
     // intro with the live sample-environment preview behind it.
+    updateDailyButton();
     if (!readShare()) {
       var seenTut = false;
       try { seenTut = !!window.localStorage.getItem('seedstorm_tutorial_seen'); } catch (e) {}

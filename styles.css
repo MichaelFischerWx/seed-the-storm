@@ -115,6 +115,29 @@ svg.ic, .brand-mark, .btn-ic, .v-ic { display: inline-block; fill: none; }
 .btn-block { width: 100%; margin-top: 16px; }
 #share-game-btn { margin-top: 10px; }
 
+/* Daily Challenge CTA on the intro — a distinct gold so it reads as the
+   headline action, separate from the green "Start game" below. */
+.btn-daily { margin: 2px 0 0; gap: 9px; font-size: 15px; font-weight: 700;
+  color: #2a1c06; border-color: transparent;
+  background: linear-gradient(180deg, #F0CE7E, #D69A3C);
+  box-shadow: 0 1px 0 rgba(255,255,255,.3) inset, var(--sh-1); }
+.btn-daily:hover { background: linear-gradient(180deg, #f6da93, #c98f2f); border-color: transparent; }
+.btn-daily .btn-ic { width: 18px; height: 18px; }
+.daily-sub { font-weight: 600; opacity: .75; font-size: 12.5px; }
+.daily-tag { margin: 8px 0 14px; font-size: 12px; line-height: 1.45; color: var(--ink-dim); }
+.daily-tag b { color: var(--ink); font-weight: 600; }
+
+/* free-placement marker: a pulsing target you drop and drag */
+.place-pin { width: 30px; height: 30px; border-radius: 50%;
+  border: 2px solid var(--accent-2); cursor: grab;
+  background: radial-gradient(circle, rgba(45,189,160,.45), rgba(45,189,160,.04) 70%);
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 0 2px rgba(8,22,18,.55), 0 0 12px var(--glow);
+  animation: placepulse 1.6s ease-in-out infinite; }
+.place-pin span { width: 6px; height: 6px; border-radius: 50%; background: #fff; box-shadow: 0 0 6px #fff; }
+@keyframes placepulse { 0%, 100% { box-shadow: 0 0 0 2px rgba(8,22,18,.55), 0 0 10px var(--glow); }
+  50% { box-shadow: 0 0 0 2px rgba(8,22,18,.55), 0 0 22px var(--glow); } }
+
 /* ---- toast (transient "link copied") ---- */
 .toast {
   position: fixed; left: 50%; bottom: 28px; transform: translate(-50%, 12px);

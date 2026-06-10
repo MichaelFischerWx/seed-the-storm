@@ -71,6 +71,10 @@
         var c = L.DomUtil.create('canvas', 'leaflet-field-canvas');
         c.style.position = 'absolute'; c.style.pointerEvents = 'none';
         c.style.opacity = 0;
+        // display:none (not just opacity/visibility) until first rendered — an
+        // idle default-size (300x150) canvas otherwise left a faint GPU
+        // compositing ghost rectangle on the map even at opacity 0.
+        c.style.display = 'none';
         pane.appendChild(c);
         this._cv.push(c); this._cx.push(c.getContext('2d'));
       }
@@ -85,6 +89,7 @@
 
     onRemove: function (map) {
       this._cancelChunk();
+      if (this._sizeRaf) { cancelAnimationFrame(this._sizeRaf); this._sizeRaf = 0; }
       map.off('moveend zoomend resize', this._redraw, this);
       map.off('zoomanim', this._onZoomAnim, this);
       map.off('zoom', this._onZoom, this);
@@ -137,6 +142,16 @@
     _redraw: function () {
       if (!this._cv) return;
       this._cancelChunk();
+      // The map may not be laid out yet on first add (size 0). Rendering then
+      // would bake a degenerate 2x2 canvas that never recovers without a map
+      // event — so defer to the next frame until the container has a real size.
+      var size = this._map.getSize();
+      if (!size.x || !size.y) {
+        var self = this;
+        if (this._sizeRaf) cancelAnimationFrame(this._sizeRaf);
+        this._sizeRaf = requestAnimationFrame(function () { self._sizeRaf = 0; self._redraw(); });
+        return;
+      }
       this._rebuildGeom();
       var d0 = Math.floor(this._t), f = this._t - d0;
       this._renderSync(this._front, d0);
@@ -174,7 +189,7 @@
       var g = this._geom, c = this._cv[idx];
       c.width = g.w; c.height = g.h;
       c.style.width = g.cssW + 'px'; c.style.height = g.cssH + 'px';
-      c.style.visibility = '';
+      c.style.display = '';   // reveal now that it's sized + about to be painted
       L.DomUtil.setPosition(c, g.origin);
     },
 

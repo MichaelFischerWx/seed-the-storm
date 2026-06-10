@@ -42,7 +42,7 @@
     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
     crossorigin=""
   />
-  <link rel="stylesheet" href="styles.css?v=46" />
+  <link rel="stylesheet" href="styles.css?v=52" />
 </head>
 <body>
   <!-- icon sprite (stroke = currentColor) -->
@@ -113,6 +113,12 @@
       <aside id="panel">
         <!-- Stage: intro -->
         <section id="stage-intro" class="stage">
+          <button id="daily-btn" class="btn btn-daily btn-block">
+            <svg class="btn-ic" aria-hidden="true"><use href="#ic-trophy"/></svg>
+            <span class="daily-main">Daily Challenge <span id="daily-sub" class="daily-sub"></span></span>
+          </button>
+          <p class="daily-tag">3 rounds — Atlantic, E. Pacific &amp; W. Pacific. <b>Drop your own seed</b>;
+            the whole world plays the same storms today.</p>
           <p class="intro-mission">Understanding what makes a hurricane strong is how we
             forecast and prepare for them. <b>Seed the Storm</b> turns that science into a game:
             read the real atmosphere and pick the seed that will intensify the most.</p>
@@ -286,13 +292,13 @@
     };
   </script>
   <!-- ?v=N busts browser/Pages cache on each deploy — bump N when JS/CSS change. -->
-  <script src="js/era5.js?v=46"></script>
-  <script src="js/mpi.js?v=46"></script>
-  <script src="js/model.js?v=46"></script>
-  <script src="js/fields.js?v=46"></script>
-  <script src="js/particles.js?v=46"></script>
-  <script src="js/sharecard.js?v=46"></script>
-  <script src="js/leaderboard.js?v=46"></script>
-  <script src="js/game.js?v=46"></script>
+  <script src="js/era5.js?v=52"></script>
+  <script src="js/mpi.js?v=52"></script>
+  <script src="js/model.js?v=52"></script>
+  <script src="js/fields.js?v=52"></script>
+  <script src="js/particles.js?v=52"></script>
+  <script src="js/sharecard.js?v=52"></script>
+  <script src="js/leaderboard.js?v=52"></script>
+  <script src="js/game.js?v=52"></script>
 </body>
 </html>
