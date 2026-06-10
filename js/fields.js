@@ -165,22 +165,30 @@
     _rebuildGeom: function () {
       var map = this._map, size = map.getSize();
       var dpr = window.devicePixelRatio || 1;
+      // Render a margin BEYOND the viewport (like tile keepBuffer) so a
+      // follow-cam pan reveals already-shaded field instead of a blank dark
+      // edge. Large on mobile — that's where the follow-cam runs, the viewport
+      // is small, and the MAX_SAMPLES cap bounds total work regardless — small
+      // on desktop so its sharpness isn't diluted.
+      var mFrac = size.x < 640 ? 0.30 : 0.08;
+      var mx = Math.round(size.x * mFrac), my = Math.round(size.y * mFrac);
+      var Wc = size.x + 2 * mx, Hc = size.y + 2 * my;
       // No supersampling on touch devices: halves the work for a sliver of
       // sharpness no one can see mid-animation on a phone.
-      var scale = Math.min(COARSE ? 1 : 2, dpr, Math.sqrt(MAX_SAMPLES / (size.x * size.y)));
-      var w = Math.max(2, Math.round(size.x * scale)), h = Math.max(2, Math.round(size.y * scale));
+      var scale = Math.min(COARSE ? 1 : 2, dpr, Math.sqrt(MAX_SAMPLES / (Wc * Hc)));
+      var w = Math.max(2, Math.round(Wc * scale)), h = Math.max(2, Math.round(Hc * scale));
       var lats = new Float64Array(h), lons = new Float64Array(w);
-      var west = map.containerPointToLatLng([0, 0]).lng;
-      var east = map.containerPointToLatLng([size.x, 0]).lng;
-      for (var j = 0; j < h; j++) lats[j] = map.containerPointToLatLng([0, (j + 0.5) * size.y / h]).lat;
+      var west = map.containerPointToLatLng([-mx, 0]).lng;
+      var east = map.containerPointToLatLng([size.x + mx, 0]).lng;
+      for (var j = 0; j < h; j++) lats[j] = map.containerPointToLatLng([0, -my + (j + 0.5) * Hc / h]).lat;
       for (var i = 0; i < w; i++) {
         var lon = west + (east - west) * (i + 0.5) / w;
         lons[i] = ((lon + 180) % 360 + 360) % 360 - 180;   // wrap to the data's [-180,180)
       }
       this._geom = {
-        w: w, h: h, cssW: size.x, cssH: size.y, lats: lats, lons: lons,
-        origin: map.containerPointToLayerPoint([0, 0]),
-        nw: map.containerPointToLatLng([0, 0]),
+        w: w, h: h, cssW: Wc, cssH: Hc, lats: lats, lons: lons,
+        origin: map.containerPointToLayerPoint([-mx, -my]),
+        nw: map.containerPointToLatLng([-mx, -my]),
         zoom: map.getZoom(),
       };
     },

@@ -109,6 +109,7 @@
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
       attribution: '&copy; OSM &middot; CARTO &middot; ERA5/TC-ATLAS',
       subdomains: 'abcd', maxZoom: 8,
+      keepBuffer: 4,   // hold extra tile rows around the viewport so follow-cam pans don't reveal blank basemap
     }).addTo(map);
     seedLayer = L.layerGroup().addTo(map);
     trackLayer = L.layerGroup().addTo(map);
@@ -385,7 +386,13 @@
   // corner average only when the interpolation comes back NaN.
   function bilinFast(F, g, lat, lon) {
     var fi = (lat - g.lat0) / g.dlat, fj = (lon - g.lon0) / g.dlon;
-    if (!(fi >= 0 && fi <= g.ny - 1 && fj >= 0 && fj <= g.nx - 1)) return NaN;
+    // Clamp to the grid edge (don't return NaN off-grid) so the shaded field
+    // extends to the map edge instead of a hard transparent cutoff. The pack
+    // ends at 0°N, and that cutoff read as a black strip whenever the
+    // follow-cam panned into the deep tropics. Visual only — the physics use
+    // ERA5.bilinear, which still returns NaN off-grid.
+    if (fi < 0) fi = 0; else if (fi > g.ny - 1) fi = g.ny - 1;
+    if (fj < 0) fj = 0; else if (fj > g.nx - 1) fj = g.nx - 1;
     var nx = g.nx, i0 = fi | 0, j0 = fj | 0;
     var i1 = i0 < g.ny - 1 ? i0 + 1 : i0, j1 = j0 < nx - 1 ? j0 + 1 : j0;
     var di = fi - i0, dj = fj - j0;

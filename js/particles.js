@@ -77,27 +77,40 @@
 
     _clear: function () {
       if (!this._ctx) return;
-      var s = this._map.getSize();
-      this._ctx.clearRect(0, 0, s.x, s.y);
+      this._ctx.clearRect(0, 0, this._cw || this._map.getSize().x, this._ch || this._map.getSize().y);
     },
 
-    // Full geometry reset (add/zoom/resize): size the canvas, fix the layer-
-    // point origin, and (re)seed only what's needed — existing particles are
-    // geo-anchored, so they survive and just respawn if now off-screen.
+    // Buffered geographic bounds (viewport expanded by the render margin), so
+    // particles live — and trails are drawn — a little beyond the visible edge.
+    _bufBounds: function () {
+      var m = this._map, s = m.getSize(), mx = this._mx || 0, my = this._my || 0;
+      var nw = m.containerPointToLatLng([-mx, -my]);
+      var se = m.containerPointToLatLng([s.x + mx, s.y + my]);
+      return { s: se.lat, n: nw.lat, w: nw.lng, e: se.lng };
+    },
+
+    // Full geometry reset (add/zoom/resize): size the canvas WITH a margin (so
+    // a follow-cam pan reveals pre-drawn trails, not a blank edge), fix the
+    // layer-point origin, and (re)seed only what's needed — existing particles
+    // are geo-anchored, so they survive and just respawn if now off-buffer.
     _reset: function () {
       if (!this._canvas) return;
       var map = this._map, size = map.getSize(), dpr = window.devicePixelRatio || 1;
+      var mFrac = size.x < 640 ? 0.30 : 0.08;   // big buffer on mobile (follow-cam), small on desktop
+      var mx = Math.round(size.x * mFrac), my = Math.round(size.y * mFrac);
+      this._mx = mx; this._my = my;
+      var Wc = size.x + 2 * mx, Hc = size.y + 2 * my;
+      this._cw = Wc; this._ch = Hc;
       var c = this._canvas;
-      c.width = size.x * dpr; c.height = size.y * dpr;
-      c.style.width = size.x + 'px'; c.style.height = size.y + 'px';
-      var org = map.containerPointToLayerPoint([0, 0]);
+      c.width = Wc * dpr; c.height = Hc * dpr;
+      c.style.width = Wc + 'px'; c.style.height = Hc + 'px';
+      var org = map.containerPointToLayerPoint([-mx, -my]);
       this._ox = org.x; this._oy = org.y;
       L.DomUtil.setPosition(c, org);
       this._ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       c.style.visibility = '';
-      // Particle density follows viewport area (one per ~1100 css px²), so a
-      // phone isn't overcrowded and a big desktop window isn't sparse.
-      var n = Math.max(450, Math.min(1500, Math.round(size.x * size.y / 1100)));
+      // Particle density follows the buffered area (one per ~1200 css px²).
+      var n = Math.max(450, Math.min(1800, Math.round(Wc * Hc / 1200)));
       var fresh = !this._p || Math.abs(n - this._N) > this._N * 0.2;
       if (fresh) {
         this._initParts(n);
@@ -110,11 +123,11 @@
     _onPan: function () {
       if (!this._canvas) return;
       var map = this._map, dpr = window.devicePixelRatio || 1;
-      var org = map.containerPointToLayerPoint([0, 0]);
+      var org = map.containerPointToLayerPoint([-(this._mx || 0), -(this._my || 0)]);
       var dx = this._ox - org.x, dy = this._oy - org.y;
       // A pan can fire before the canvas has been sized (e.g. the post-deal
-      // viewWithSheet panBy lands before onAdd's reset) — drawImage from a
-      // 0×0 canvas throws. Size it first, then there's nothing to shift.
+      // setView lands before onAdd's reset) — drawImage from a 0×0 canvas
+      // throws. Size it first, then there's nothing to shift.
       if (this._canvas.width && this._canvas.height && (dx || dy)) {
         var ctx = this._ctx, c = this._canvas;
         ctx.save();
@@ -129,17 +142,17 @@
     },
 
     _respawnOffscreen: function () {
-      var b = this._map.getBounds(), p = this._p;
+      var b = this._bufBounds(), p = this._p;
       for (var i = 0; i < this._N; i++) {
-        if (p.lat[i] > b.getNorth() + 1 || p.lat[i] < b.getSouth() - 1 ||
-            p.lon[i] > b.getEast() + 1 || p.lon[i] < b.getWest() - 1) this._spawn(i);
+        if (p.lat[i] > b.n + 0.5 || p.lat[i] < b.s - 0.5 ||
+            p.lon[i] > b.e + 0.5 || p.lon[i] < b.w - 0.5) this._spawn(i);
       }
     },
 
     _spawn: function (i) {
-      var b = this._map.getBounds(), p = this._p;
-      var lat = b.getSouth() + Math.random() * (b.getNorth() - b.getSouth());
-      var lon = b.getWest() + Math.random() * (b.getEast() - b.getWest());
+      var b = this._bufBounds(), p = this._p;
+      var lat = b.s + Math.random() * (b.n - b.s);
+      var lon = b.w + Math.random() * (b.e - b.w);
       p.lat[i] = lat; p.lon[i] = lon; p.age[i] = 0;
       p.life[i] = MAX_AGE * (1 - AGE_JIT + 2 * AGE_JIT * Math.random());
       var base = i * TRAIL;
@@ -157,12 +170,12 @@
       if (!this._env || !this._ctx) return;
       if (ts - this._lastMs < FRAME_MS) return;
       this._lastMs = ts;
-      var ctx = this._ctx, map = this._map, size = map.getSize(), p = this._p, b = map.getBounds();
+      var ctx = this._ctx, map = this._map, p = this._p, bb = this._bufBounds();
 
-      // Fade existing trails.
+      // Fade existing trails (across the whole buffered canvas).
       ctx.globalCompositeOperation = 'destination-out';
       ctx.fillStyle = 'rgba(0,0,0,' + ERASE + ')';
-      ctx.fillRect(0, 0, size.x, size.y);
+      ctx.fillRect(0, 0, this._cw, this._ch);
       ctx.globalCompositeOperation = 'source-over';
       ctx.lineCap = 'round';
 
@@ -176,8 +189,8 @@
         if (spd < MIN_MS) { this._spawn(i); continue; }
         var cosl = Math.cos(lat * DEG2RAD); if (cosl < 0.05) cosl = 0.05;
         var nlat = lat + uv.v * STEP_DEG, nlon = lon + (uv.u / cosl) * STEP_DEG;
-        if (nlat > b.getNorth() + 1 || nlat < b.getSouth() - 1 ||
-            nlon > b.getEast() + 1 || nlon < b.getWest() - 1) { this._spawn(i); continue; }
+        if (nlat > bb.n + 0.5 || nlat < bb.s - 0.5 ||
+            nlon > bb.e + 0.5 || nlon < bb.w - 0.5) { this._spawn(i); continue; }
 
         var head = (p.head[i] + 1) % TRAIL; p.head[i] = head;
         var base = i * TRAIL;
